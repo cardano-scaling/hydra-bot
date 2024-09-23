@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::net_structs::{NET_MAXPLAYERS, BACKUPTICS, TicCmd, GameSettings};
-use crate::{net_client, net_server};
+use crate::net_client;
 
 // Constants
 const TICRATE: u32 = 35;
@@ -38,8 +38,8 @@ fn get_adjusted_time() -> u32 {
         .unwrap()
         .as_millis() as i32;
 
-    if unsafe { NEW_SYNC } {
-        (time_ms + unsafe { OFFSETMS / FRACUNIT }) as u32 * TICRATE / 1000
+    if NEW_SYNC.load(Ordering::Relaxed) {
+        (time_ms + OFFSETMS.load(Ordering::Relaxed)) as u32 * TICRATE / 1000
     } else {
         time_ms as u32 * TICRATE / 1000
     }
@@ -47,15 +47,15 @@ fn get_adjusted_time() -> u32 {
 
 // Function to build new tic
 fn build_new_tic() -> bool {
-    let gameticdiv = unsafe { GAMETIC / TICDUP };
+    let gameticdiv = MAKETIC.load(Ordering::Relaxed) / TICDUP;
 
     // Call ProcessEvents from loop_interface
-    unsafe { loop_interface.process_events() };
+    process_events();
 
     // Always run the menu
-    unsafe { loop_interface.run_menu() };
+    run_menu();
 
-    if unsafe { DRONE } {
+    if DRONE.load(Ordering::Relaxed) {
         // In drone mode, do not generate any ticcmds.
         return false;
     }
@@ -94,15 +94,15 @@ fn build_new_tic() -> bool {
 
 // NetUpdate function
 pub fn net_update() {
-    let mut nowtime;
-    let mut newtics;
-    let mut i;
-
     // If we are running with singletics (timing a demo), this
     // is all done separately.
-    if unsafe { SINGLETICS } {
+    if SINGLETICS.load(Ordering::Relaxed) {
         return;
     }
+
+    let nowtime = get_adjusted_time();
+    let mut newtics = nowtime - LASTTIME.load(Ordering::Relaxed);
+    LASTTIME.store(nowtime, Ordering::Relaxed);
 
     // Run network subsystems
     net_client::run();
@@ -238,11 +238,12 @@ pub fn try_run_tics() {
 }
 
 fn get_low_tic() -> i32 {
-    let mut lowtic = unsafe { MAKETIC };
+    let mut lowtic = MAKETIC.load(Ordering::Relaxed);
 
     if net_client::is_connected() {
-        if unsafe { DRONE || RECVTIC < lowtic } {
-            lowtic = unsafe { RECVTIC };
+        let recvtic = RECVTIC.load(Ordering::Relaxed);
+        if DRONE.load(Ordering::Relaxed) || recvtic < lowtic {
+            lowtic = recvtic;
         }
     }
 
@@ -272,9 +273,10 @@ fn old_net_sync() {
 
 fn players_in_game() -> bool {
     if net_client::is_connected() {
-        unsafe { LOCAL_PLAYERINGAME.iter().any(|&x| x) }
+        // Assuming LOCAL_PLAYERINGAME is a global array of booleans
+        LOCAL_PLAYERINGAME.iter().any(|&x| x)
     } else {
-        !unsafe { DRONE }
+        !DRONE.load(Ordering::Relaxed)
     }
 }
 
@@ -302,3 +304,20 @@ pub fn init() {
     INSTANCE_UID.store(uid, Ordering::SeqCst);
     println!("doom: 8, uid is {}", uid);
 }
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+
+const TICRATE: u32 = 35;
+const NET_MAXPLAYERS: usize = 4;
+const BACKUPTICS: usize = 128;
+
+static OFFSETMS: AtomicI32 = AtomicI32::new(0);
+static NEW_SYNC: AtomicBool = AtomicBool::new(false);
+static DRONE: AtomicBool = AtomicBool::new(false);
+static SINGLETICS: AtomicBool = AtomicBool::new(false);
+static MAKETIC: AtomicI32 = AtomicI32::new(0);
+static RECVTIC: AtomicI32 = AtomicI32::new(0);
+static LASTTIME: AtomicI32 = AtomicI32::new(0);
+static SKIPTICS: AtomicI32 = AtomicI32::new(0);
+static FRAMEON: AtomicI32 = AtomicI32::new(0);
+static OLDNETTICS: AtomicI32 = AtomicI32::new(0);
+static LOCALPLAYER: AtomicI32 = AtomicI32::new(0);
