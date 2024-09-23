@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicI32, AtomicBool, Ordering};
 
-use crate::net_structs::{NET_MAXPLAYERS, BACKUPTICS, TicCmd, GameSettings};
+use crate::net_structs::{TicCmd, GameSettings};
 use crate::net_client;
 
 // Constants
@@ -11,25 +11,25 @@ const MAX_NETGAME_STALL_TICS: u32 = 2;
 // Structs
 #[derive(Clone, Copy)]
 struct TiccmdSet {
-    cmds: [TicCmd; NET_MAXPLAYERS],
-    ingame: [bool; NET_MAXPLAYERS],
+    cmds: [TicCmd; crate::net_structs::NET_MAXPLAYERS],
+    ingame: [bool; crate::net_structs::NET_MAXPLAYERS],
 }
 
 // Global variables
 static INSTANCE_UID: AtomicU32 = AtomicU32::new(0);
-static mut TICDATA: [TiccmdSet; BACKUPTICS] = [TiccmdSet {
-    cmds: [TicCmd::default(); NET_MAXPLAYERS],
-    ingame: [false; NET_MAXPLAYERS],
-}; BACKUPTICS];
+static mut TICDATA: [TiccmdSet; crate::net_structs::BACKUPTICS] = [TiccmdSet {
+    cmds: [TicCmd::default(); crate::net_structs::NET_MAXPLAYERS],
+    ingame: [false; crate::net_structs::NET_MAXPLAYERS],
+}; crate::net_structs::BACKUPTICS];
 
-static mut MAKETIC: i32 = 0;
-static mut RECVTIC: i32 = 0;
-static mut GAMETIC: i32 = 0;
-static mut LOCALPLAYER: i32 = 0;
-static mut OFFSETMS: i32 = 0;
-static mut TICDUP: i32 = 1;
-static mut NEW_SYNC: bool = true;
-static mut LOCAL_PLAYERINGAME: [bool; NET_MAXPLAYERS] = [false; NET_MAXPLAYERS];
+static MAKETIC: AtomicI32 = AtomicI32::new(0);
+static RECVTIC: AtomicI32 = AtomicI32::new(0);
+static GAMETIC: AtomicI32 = AtomicI32::new(0);
+static LOCALPLAYER: AtomicI32 = AtomicI32::new(0);
+static OFFSETMS: AtomicI32 = AtomicI32::new(0);
+static TICDUP: AtomicI32 = AtomicI32::new(1);
+static NEW_SYNC: AtomicBool = AtomicBool::new(true);
+static mut LOCAL_PLAYERINGAME: [bool; crate::net_structs::NET_MAXPLAYERS] = [false; crate::net_structs::NET_MAXPLAYERS];
 
 // Function to get adjusted time
 fn get_adjusted_time() -> u32 {
@@ -47,47 +47,49 @@ fn get_adjusted_time() -> u32 {
 
 // Function to build new tic
 fn build_new_tic() -> bool {
-    let gameticdiv = MAKETIC.load(Ordering::Relaxed) / TICDUP;
+    let gameticdiv = MAKETIC.load(Ordering::Relaxed) / TICDUP.load(Ordering::Relaxed);
 
     // Call ProcessEvents from loop_interface
-    process_events();
+    // process_events();
 
     // Always run the menu
-    run_menu();
+    // run_menu();
 
     if DRONE.load(Ordering::Relaxed) {
         // In drone mode, do not generate any ticcmds.
         return false;
     }
 
-    if unsafe { NEW_SYNC } {
+    if NEW_SYNC.load(Ordering::Relaxed) {
         // If playing single player, do not allow tics to buffer up very far
-        if !net_client::is_connected() && unsafe { MAKETIC - gameticdiv > 2 } {
+        if !net_client::is_connected() && MAKETIC.load(Ordering::Relaxed) - gameticdiv > 2 {
             return false;
         }
 
         // Never go more than ~200ms ahead
-        if unsafe { MAKETIC - gameticdiv > 8 } {
+        if MAKETIC.load(Ordering::Relaxed) - gameticdiv > 8 {
             return false;
         }
     } else {
-        if unsafe { MAKETIC - gameticdiv >= 5 } {
+        if MAKETIC.load(Ordering::Relaxed) - gameticdiv >= 5 {
             return false;
         }
     }
 
     let mut cmd = TicCmd::default();
-    unsafe { loop_interface.build_ticcmd(&mut cmd, MAKETIC) };
+    // unsafe { loop_interface.build_ticcmd(&mut cmd, MAKETIC.load(Ordering::Relaxed)) };
 
     if net_client::is_connected() {
-        net_client::send_ticcmd(&cmd, unsafe { MAKETIC });
+        net_client::send_ticcmd(&cmd, MAKETIC.load(Ordering::Relaxed));
     }
 
     unsafe {
-        TICDATA[MAKETIC % BACKUPTICS].cmds[LOCALPLAYER as usize] = cmd;
-        TICDATA[MAKETIC % BACKUPTICS].ingame[LOCALPLAYER as usize] = true;
-        MAKETIC += 1;
+        let maketic = MAKETIC.load(Ordering::Relaxed) as usize;
+        let localplayer = LOCALPLAYER.load(Ordering::Relaxed) as usize;
+        TICDATA[maketic % crate::net_structs::BACKUPTICS].cmds[localplayer] = cmd;
+        TICDATA[maketic % crate::net_structs::BACKUPTICS].ingame[localplayer] = true;
     }
+    MAKETIC.fetch_add(1, Ordering::Relaxed);
 
     true
 }
@@ -101,24 +103,25 @@ pub fn net_update() {
     }
 
     let nowtime = get_adjusted_time();
-    let mut newtics = nowtime - LASTTIME.load(Ordering::Relaxed);
-    LASTTIME.store(nowtime, Ordering::Relaxed);
+    let mut newtics = nowtime.saturating_sub(LASTTIME.load(Ordering::Relaxed) as u32);
+    LASTTIME.store(nowtime as i32, Ordering::Relaxed);
 
     // Run network subsystems
     net_client::run();
-    net_server::run();
+    // net_server::run();
 
     // check time
-    nowtime = (get_adjusted_time() / unsafe { TICDUP } as u32) as i32;
-    newtics = nowtime - unsafe { LASTTIME };
+    let nowtime = (get_adjusted_time() / TICDUP.load(Ordering::Relaxed) as u32) as i32;
+    newtics = nowtime.saturating_sub(LASTTIME.load(Ordering::Relaxed)) as u32;
 
-    unsafe { LASTTIME = nowtime };
+    LASTTIME.store(nowtime, Ordering::Relaxed);
 
-    if unsafe { SKIPTICS <= newtics } {
-        newtics -= unsafe { SKIPTICS };
-        unsafe { SKIPTICS = 0 };
+    let mut skiptics = SKIPTICS.load(Ordering::Relaxed);
+    if skiptics <= newtics as i32 {
+        newtics = newtics.saturating_sub(skiptics as u32);
+        SKIPTICS.store(0, Ordering::Relaxed);
     } else {
-        unsafe { SKIPTICS -= newtics };
+        SKIPTICS.fetch_sub(newtics as i32, Ordering::Relaxed);
         newtics = 0;
     }
 
@@ -132,20 +135,18 @@ pub fn net_update() {
 
 // D_StartGameLoop function
 pub fn d_start_game_loop() {
-    unsafe {
-        LASTTIME = (get_adjusted_time() / TICDUP as u32) as i32;
-    }
+    LASTTIME.store((get_adjusted_time() / TICDUP.load(Ordering::Relaxed) as u32) as i32, Ordering::Relaxed);
 }
 
 // TryRunTics function
 pub fn try_run_tics() {
-    let enter_tic = (get_adjusted_time() / unsafe { TICDUP } as u32) as i32;
+    let enter_tic = (get_adjusted_time() / TICDUP.load(Ordering::Relaxed) as u32) as i32;
     let mut realtics;
     let mut availabletics;
     let mut counts;
     let lowtic;
 
-    if unsafe { SINGLETICS } {
+    if SINGLETICS.load(Ordering::Relaxed) {
         build_new_tic();
     } else {
         net_update();
@@ -153,12 +154,12 @@ pub fn try_run_tics() {
 
     lowtic = get_low_tic();
 
-    availabletics = lowtic - unsafe { GAMETIC / TICDUP };
+    availabletics = lowtic - GAMETIC.load(Ordering::Relaxed) / TICDUP.load(Ordering::Relaxed);
 
-    realtics = enter_tic - unsafe { OLDENTERTICS };
-    unsafe { OLDENTERTICS = enter_tic };
+    realtics = enter_tic - OLDENTERTICS.load(Ordering::Relaxed);
+    OLDENTERTICS.store(enter_tic, Ordering::Relaxed);
 
-    if unsafe { NEW_SYNC } {
+    if NEW_SYNC.load(Ordering::Relaxed) {
         counts = availabletics;
     } else {
         if realtics < availabletics - 1 {
@@ -183,21 +184,21 @@ pub fn try_run_tics() {
     }
 
     // wait for new tics if needed
-    while !players_in_game() || lowtic < unsafe { GAMETIC / TICDUP + counts } {
+    while !players_in_game() || lowtic < GAMETIC.load(Ordering::Relaxed) / TICDUP.load(Ordering::Relaxed) + counts {
         net_update();
 
         lowtic = get_low_tic();
 
-        if lowtic < unsafe { GAMETIC / TICDUP } {
+        if lowtic < GAMETIC.load(Ordering::Relaxed) / TICDUP.load(Ordering::Relaxed) {
             panic!("TryRunTics: lowtic < gametic");
         }
 
         // Still no tics to run? Sleep until some are available.
-        if lowtic < unsafe { GAMETIC / TICDUP + counts } {
+        if lowtic < GAMETIC.load(Ordering::Relaxed) / TICDUP.load(Ordering::Relaxed) + counts {
             // If we're in a netgame, we might spin forever waiting for
             // new network data to be received. So don't stay in here
             // forever - give the menu a chance to work.
-            if get_adjusted_time() / unsafe { TICDUP } as u32 - enter_tic as u32 >= MAX_NETGAME_STALL_TICS {
+            if get_adjusted_time() / TICDUP.load(Ordering::Relaxed) as u32 - enter_tic as u32 >= MAX_NETGAME_STALL_TICS {
                 return;
             }
 
@@ -211,21 +212,21 @@ pub fn try_run_tics() {
         }
 
         unsafe {
-            let set = &mut TICDATA[(GAMETIC / TICDUP) as usize % BACKUPTICS];
+            let set = &mut TICDATA[(GAMETIC.load(Ordering::Relaxed) / TICDUP.load(Ordering::Relaxed)) as usize % crate::net_structs::BACKUPTICS];
 
             if !net_client::is_connected() {
                 single_player_clear(set);
             }
 
-            for _ in 0..TICDUP {
-                if GAMETIC / TICDUP > lowtic {
+            for _ in 0..TICDUP.load(Ordering::Relaxed) {
+                if GAMETIC.load(Ordering::Relaxed) / TICDUP.load(Ordering::Relaxed) > lowtic {
                     panic!("gametic>lowtic");
                 }
 
                 LOCAL_PLAYERINGAME.copy_from_slice(&set.ingame);
 
-                loop_interface.run_tic(&set.cmds, &set.ingame);
-                GAMETIC += 1;
+                // loop_interface.run_tic(&set.cmds, &set.ingame);
+                GAMETIC.fetch_add(1, Ordering::Relaxed);
 
                 // modify command for duplicated tics
                 ticdup_squash(set);
@@ -251,22 +252,21 @@ fn get_low_tic() -> i32 {
 }
 
 fn old_net_sync() {
-    unsafe {
-        FRAMEON += 1;
+    FRAMEON.fetch_add(1, Ordering::Relaxed);
 
-        let keyplayer = LOCAL_PLAYERINGAME.iter().position(|&x| x).unwrap_or(0) as i32;
+    let keyplayer = unsafe { LOCAL_PLAYERINGAME.iter().position(|&x| x).unwrap_or(0) as i32 };
 
-        if LOCALPLAYER != keyplayer {
-            if MAKETIC <= RECVTIC {
-                LASTTIME -= 1;
-            }
+    if LOCALPLAYER.load(Ordering::Relaxed) != keyplayer {
+        if MAKETIC.load(Ordering::Relaxed) <= RECVTIC.load(Ordering::Relaxed) {
+            LASTTIME.fetch_sub(1, Ordering::Relaxed);
+        }
 
-            FRAMESKIP[FRAMEON as usize & 3] = OLDNETTICS > RECVTIC;
-            OLDNETTICS = MAKETIC;
+        let frameon = FRAMEON.load(Ordering::Relaxed) as usize;
+        FRAMESKIP[frameon & 3] = OLDNETTICS.load(Ordering::Relaxed) > RECVTIC.load(Ordering::Relaxed);
+        OLDNETTICS.store(MAKETIC.load(Ordering::Relaxed), Ordering::Relaxed);
 
-            if FRAMESKIP.iter().all(|&x| x) {
-                SKIPTICS = 1;
-            }
+        if FRAMESKIP.iter().all(|&x| x) {
+            SKIPTICS.store(1, Ordering::Relaxed);
         }
     }
 }
@@ -274,15 +274,16 @@ fn old_net_sync() {
 fn players_in_game() -> bool {
     if net_client::is_connected() {
         // Assuming LOCAL_PLAYERINGAME is a global array of booleans
-        LOCAL_PLAYERINGAME.iter().any(|&x| x)
+        unsafe { LOCAL_PLAYERINGAME.iter().any(|&x| x) }
     } else {
         !DRONE.load(Ordering::Relaxed)
     }
 }
 
 fn single_player_clear(set: &mut TiccmdSet) {
-    for i in 0..NET_MAXPLAYERS {
-        if i != unsafe { LOCALPLAYER } as usize {
+    let localplayer = LOCALPLAYER.load(Ordering::Relaxed) as usize;
+    for i in 0..crate::net_structs::NET_MAXPLAYERS {
+        if i != localplayer {
             set.ingame[i] = false;
         }
     }
@@ -291,7 +292,7 @@ fn single_player_clear(set: &mut TiccmdSet) {
 fn ticdup_squash(set: &mut TiccmdSet) {
     for cmd in &mut set.cmds {
         cmd.chatchar = 0;
-        if cmd.buttons & BT_SPECIAL != 0 {
+        if cmd.buttons & crate::net_structs::BT_SPECIAL != 0 {
             cmd.buttons = 0;
         }
     }
@@ -304,6 +305,15 @@ pub fn init() {
     INSTANCE_UID.store(uid, Ordering::SeqCst);
     println!("doom: 8, uid is {}", uid);
 }
+
+static FRAMESKIP: [bool; 4] = [false; 4];
+static DRONE: AtomicBool = AtomicBool::new(false);
+static SINGLETICS: AtomicBool = AtomicBool::new(false);
+static LASTTIME: AtomicI32 = AtomicI32::new(0);
+static SKIPTICS: AtomicI32 = AtomicI32::new(0);
+static FRAMEON: AtomicI32 = AtomicI32::new(0);
+static OLDNETTICS: AtomicI32 = AtomicI32::new(0);
+static OLDENTERTICS: AtomicI32 = AtomicI32::new(0);
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 const TICRATE: u32 = 35;
