@@ -854,17 +854,25 @@ impl NetClient {
                 self.send_syn(&connect_data);
                 self.last_send_time = now;
                 self.num_retries += 1;
+                println!("Client: Sent SYN packet. Retry count: {}", self.num_retries);
             }
 
-            if now.duration_since(self.start_time) > Duration::from_secs(120) {
+            if now.duration_since(self.start_time) > Duration::from_secs(30) {
                 self.reject_reason = Some("No response from server".to_string());
+                println!("Client: Connection timed out after 30 seconds");
                 break;
             }
 
             self.run();
 
+            // Check for incoming packets
+            if let Some((_, packet)) = self.context.recv_packet() {
+                println!("Client: Received packet: {:?}", packet);
+                self.parse_packet(&mut packet.clone());
+            }
+
             // Don't hog the CPU
-            std::thread::sleep(Duration::from_millis(1));
+            std::thread::sleep(Duration::from_millis(10));
         }
 
         if self.state == ClientState::Connected {
@@ -874,7 +882,7 @@ impl NetClient {
             self.drone = connect_data.drone != 0;
             true
         } else {
-            println!("Client: Connection failed");
+            println!("Client: Connection failed. Reason: {:?}", self.reject_reason);
             self.shutdown();
             false
         }
