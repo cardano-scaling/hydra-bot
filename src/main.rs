@@ -5,7 +5,7 @@ mod net_client;
 mod net_packet;
 mod net_structs;
 
-use tracing::{info, debug, error};
+use tracing::{info, debug, error, warn};
 use std::net::SocketAddr;
 use tokio::time::{sleep, Duration};
 
@@ -38,12 +38,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         player_class: 0,
     };
 
-    match client.connect(NetAddr::from(server_addr), connect_data).await {
-        Ok(_) => info!("Connected to server successfully"),
-        Err(e) => {
-            error!("Failed to connect to server: {}", e);
-            return Err(e.into());
+    let max_retries = 5;
+    let mut retry_count = 0;
+    let mut last_error = String::new();
+
+    while retry_count < max_retries {
+        match client.connect(NetAddr::from(server_addr), connect_data.clone()).await {
+            Ok(_) => {
+                info!("Connected to server successfully");
+                break;
+            }
+            Err(e) => {
+                warn!("Failed to connect to server (attempt {}/{}): {}", retry_count + 1, max_retries, e);
+                last_error = e;
+                retry_count += 1;
+                if retry_count < max_retries {
+                    sleep(Duration::from_secs(2)).await;
+                }
+            }
         }
+    }
+
+    if retry_count == max_retries {
+        error!("Failed to connect to server after {} attempts. Last error: {}", max_retries, last_error);
+        return Err(last_error.into());
     }
 
     info!("Client and game initialized, starting main loop");
