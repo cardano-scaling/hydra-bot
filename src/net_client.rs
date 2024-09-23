@@ -1,4 +1,3 @@
-use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::net_packet::NetPacket;
@@ -141,10 +140,7 @@ impl NetClient {
     }
 
     fn handle_disconnected(&mut self) {
-        self.receive_tic(
-            &[TicCmd::default(); NET_MAXPLAYERS],
-            &[false; NET_MAXPLAYERS],
-        );
+        self.receive_tic(&[TicCmd::default(); NET_MAXPLAYERS], &[false; NET_MAXPLAYERS]);
         self.shutdown();
     }
 
@@ -723,7 +719,6 @@ impl NetClient {
             }
 
             self.run();
-            thread::sleep(Duration::from_millis(1));
         }
 
         println!("Client: Disconnect complete");
@@ -759,10 +754,8 @@ impl NetClient {
         self.state = ClientState::Disconnected;
         self.reject_reason = Some("Unknown reason".to_string());
 
-        self.net_local_wad_sha1sum
-            .copy_from_slice(&connect_data.wad_sha1sum);
-        self.net_local_deh_sha1sum
-            .copy_from_slice(&connect_data.deh_sha1sum);
+        self.net_local_wad_sha1sum.copy_from_slice(&connect_data.wad_sha1sum);
+        self.net_local_deh_sha1sum.copy_from_slice(&connect_data.deh_sha1sum);
         self.net_local_is_freedoom = connect_data.is_freedoom != 0;
 
         self.net_client_connected = true;
@@ -785,8 +778,6 @@ impl NetClient {
             }
 
             self.run();
-            // Simulate NET_SV_Run() if necessary
-            thread::sleep(Duration::from_millis(1));
         }
 
         if self.connection.state == ConnectionState::Connected {
