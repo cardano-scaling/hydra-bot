@@ -131,11 +131,25 @@ pub struct NetModule {
     pub resolve_address: fn(addr: &str) -> Option<NetAddr>,
 }
 
+use std::net::SocketAddr;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct NetAddr {
     pub module: *mut NetModule,
     pub refcount: i32,
     pub handle: *mut c_void,
+    pub socket_addr: SocketAddr,
+}
+
+impl From<SocketAddr> for NetAddr {
+    fn from(addr: SocketAddr) -> Self {
+        NetAddr {
+            module: std::ptr::null_mut(),
+            refcount: 1,
+            handle: std::ptr::null_mut(),
+            socket_addr: addr,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

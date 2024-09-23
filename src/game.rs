@@ -97,8 +97,7 @@ impl Game {
         }
 
         let mut cmd = TicCmd::default();
-        // TODO: Implement build_ticcmd
-        // client.build_ticcmd(&mut cmd, self.maketic);
+        client.build_ticcmd(&mut cmd, self.maketic as u32);
 
         if client.is_connected() {
             client.send_ticcmd(&cmd, self.maketic as u32);
@@ -228,8 +227,7 @@ impl Game {
 
                 self.local_playeringame = set.ingame;
 
-                // TODO: Implement run_tic
-                // client.run_tic(&set.cmds, &set.ingame);
+                client.run_tic(&set.cmds, &set.ingame);
                 self.gametic += 1;
 
                 Self::ticdup_squash(set);

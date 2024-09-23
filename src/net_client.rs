@@ -880,6 +880,21 @@ impl NetClient {
         }
     }
 
+    pub fn build_ticcmd(&mut self, cmd: &mut TicCmd, maketic: u32) {
+        // For now, we'll just create empty commands
+        *cmd = TicCmd::default();
+    }
+
+    pub fn run_tic(&mut self, cmds: &[TicCmd; NET_MAXPLAYERS], ingame: &[bool; NET_MAXPLAYERS]) {
+        // Process the received tics
+        // For now, we'll just print out the received commands
+        for (i, (cmd, &in_game)) in cmds.iter().zip(ingame.iter()).enumerate() {
+            if in_game {
+                println!("Player {}: {:?}", i, cmd);
+            }
+        }
+    }
+
     fn send_syn(&self, data: &ConnectData) {
         let mut packet = NetPacket::new();
         packet.write_u16(NET_PACKET_TYPE_SYN);
