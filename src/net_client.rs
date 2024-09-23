@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn, error};
+use tokio::net::UdpSocket;
+use std::sync::Arc;
 
 use crate::net_packet::NetPacket;
 use crate::net_structs::*;
@@ -56,6 +58,7 @@ pub struct NetClient {
     recvwindow_cmd_base: Vec<TicCmd>,
     start_time: Instant,
     num_retries: u32,
+    socket: Option<Arc<UdpSocket>>,
 }
 
 impl NetClient {
@@ -100,6 +103,7 @@ impl NetClient {
             recvwindow_cmd_base: vec![TicCmd::default(); NET_MAXPLAYERS],
             num_retries: 0,
             start_time: Instant::now(),
+            socket: None,
         }
     }
 
@@ -138,17 +142,15 @@ impl NetClient {
         pet_names[rand::random::<usize>() % pet_names.len()].to_string()
     }
 
-    pub fn run(&mut self) {
+    pub async fn run(&mut self) {
         self.run_bot();
 
         if !self.net_client_connected {
             return;
         }
 
-        while let Some((addr, mut packet)) = self.context.recv_packet() {
-            if Some(addr) == self.server_addr {
-                self.parse_packet(&mut packet);
-            }
+        if let Some(packet) = self.recv_packet().await {
+            self.parse_packet(&packet);
         }
 
         self.connection.run();
@@ -175,7 +177,7 @@ impl NetClient {
         }
 
         // Send keepalive if needed
-        self.send_keepalive();
+        self.send_keepalive().await;
     }
 
     fn handle_connection_timeout(&mut self) {
@@ -191,15 +193,20 @@ impl NetClient {
         self.shutdown();
     }
 
-    fn send_keepalive(&mut self) {
+    async fn send_keepalive(&mut self) {
         if self.state == ClientState::Connected || self.state == ClientState::InGame {
             let now = Instant::now();
             if now.duration_since(self.last_send_time) > Duration::from_secs(1) {
                 let mut packet = NetPacket::new();
                 packet.write_u16(NET_PACKET_TYPE_GAMEDATA_ACK);
                 packet.write_u8((self.recv_window_start & 0xff) as u8);
-                self.connection.send_packet(&packet, self.server_addr.as_ref().unwrap());
-                self.last_send_time = now;
+                if let Some(socket) = &self.socket {
+                    if let Err(e) = socket.send(&packet.data).await {
+                        warn!("Failed to send keepalive: {}", e);
+                    } else {
+                        self.last_send_time = now;
+                    }
+                }
             }
         }
     }
@@ -849,6 +856,11 @@ impl NetClient {
         self.server_addr = Some(addr.clone());
         self.connection.init_client(&addr, &connect_data);
 
+        // Create and bind the UDP socket
+        let socket = UdpSocket::bind("0.0.0.0:0").await.map_err(|e| e.to_string())?;
+        socket.connect(addr.socket_addr).await.map_err(|e| e.to_string())?;
+        self.socket = Some(Arc::new(socket));
+
         self.state = ClientState::Connecting;
         self.reject_reason = Some("Unknown reason".to_string());
 
@@ -884,7 +896,7 @@ impl NetClient {
                         return Err(error_msg);
                     }
 
-                    match self.send_syn(&connect_data) {
+                    match self.send_syn(&connect_data).await {
                         Ok(_) => {
                             self.num_retries += 1;
                             debug!("Sent SYN packet. Retry count: {}", self.num_retries);
@@ -896,12 +908,12 @@ impl NetClient {
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                    self.run();
+                    self.run().await;
 
                     // Check for incoming packets
-                    while let Some((_, mut packet)) = self.context.recv_packet() {
+                    if let Some(packet) = self.recv_packet().await {
                         debug!("Received packet: {:?}", packet);
-                        self.parse_packet(&mut packet);
+                        self.parse_packet(&packet);
                         
                         // Check if we've transitioned to Connected state
                         if self.state == ClientState::Connected {
@@ -923,7 +935,7 @@ impl NetClient {
         Err(error_msg)
     }
 
-    fn send_syn(&self, data: &ConnectData) -> Result<(), String> {
+    async fn send_syn(&self, data: &ConnectData) -> Result<(), String> {
         let mut packet = NetPacket::new();
         packet.write_u16(NET_PACKET_TYPE_SYN);
         packet.write_u32(NET_MAGIC_NUMBER);
@@ -932,12 +944,12 @@ impl NetClient {
         packet.write_connect_data(data);
         packet.write_string(&self.player_name);
 
-        if let Some(server_addr) = self.server_addr.as_ref() {
-            self.connection.send_packet(&packet, server_addr);
-            debug!("SYN sent to {:?}", server_addr);
+        if let Some(socket) = &self.socket {
+            socket.send(&packet.data).await.map_err(|e| e.to_string())?;
+            debug!("SYN sent to server");
             Ok(())
         } else {
-            Err("Server address not set".to_string())
+            Err("Socket not initialized".to_string())
         }
     }
 
@@ -970,3 +982,21 @@ mod tests {
         assert!(!client.drone);
     }
 }
+    async fn recv_packet(&self) -> Option<NetPacket> {
+        if let Some(socket) = &self.socket {
+            let mut buf = [0u8; 1024];
+            match socket.recv(&mut buf).await {
+                Ok(size) => {
+                    let mut packet = NetPacket::new();
+                    packet.data.extend_from_slice(&buf[..size]);
+                    Some(packet)
+                }
+                Err(e) => {
+                    debug!("Error receiving packet: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }

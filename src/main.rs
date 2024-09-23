@@ -64,6 +64,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         game.try_run_tics(&mut client);
 
+        // Run the client
+        client.run().await;
+
         // Add some delay to prevent busy-waiting
         sleep(Duration::from_millis(10)).await;
         debug!("Completed a game loop iteration");
