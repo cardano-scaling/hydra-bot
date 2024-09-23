@@ -1,5 +1,6 @@
 #![allow(unused)]
 
+mod d_loop;
 mod net_client;
 mod net_packet;
 mod net_structs;
