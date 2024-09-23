@@ -218,7 +218,7 @@ impl Game {
             let set = &mut self.ticdata[(self.gametic / self.ticdup) as usize % BACKUPTICS];
 
             if !client.is_connected() {
-                self.single_player_clear(set);
+                Self::single_player_clear(self.localplayer as usize, set);
             }
 
             for _ in 0..self.ticdup {
@@ -232,7 +232,7 @@ impl Game {
                 // client.run_tic(&set.cmds, &set.ingame);
                 self.gametic += 1;
 
-                self.ticdup_squash(set);
+                Self::ticdup_squash(set);
             }
 
             self.net_update(client);
@@ -278,8 +278,7 @@ impl Game {
         }
     }
 
-    fn single_player_clear(&self, set: &mut TiccmdSet) {
-        let localplayer = self.localplayer as usize;
+    fn single_player_clear(localplayer: usize, set: &mut TiccmdSet) {
         for i in 0..NET_MAXPLAYERS {
             if i != localplayer {
                 set.ingame[i] = false;
@@ -287,7 +286,7 @@ impl Game {
         }
     }
 
-    fn ticdup_squash(&mut self, set: &mut TiccmdSet) {
+    fn ticdup_squash(set: &mut TiccmdSet) {
         for cmd in &mut set.cmds {
             cmd.chatchar = 0;
             if cmd.buttons & 0x80 != 0 { // 0x80 is the value for BT_SPECIAL
