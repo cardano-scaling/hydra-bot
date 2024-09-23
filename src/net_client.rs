@@ -932,8 +932,17 @@ impl NetClient {
         packet.write_u16(NET_PACKET_TYPE_SYN);
         packet.write_u32(NET_MAGIC_NUMBER);
         packet.write_string(env!("CARGO_PKG_VERSION"));
-        packet.write_protocol_list();
-        packet.write_connect_data(data);
+        packet.write_u8(1); // Number of protocols
+        packet.write_string("CHOCOLATE_DOOM_0");
+        packet.write_u8(data.gamemode as u8);
+        packet.write_u8(data.gamemission as u8);
+        packet.write_u8(data.lowres_turn as u8);
+        packet.write_u8(data.drone as u8);
+        packet.write_u8(data.max_players as u8);
+        packet.write_u8(data.is_freedoom as u8);
+        packet.write_blob(&data.wad_sha1sum);
+        packet.write_blob(&data.deh_sha1sum);
+        packet.write_u8(data.player_class as u8);
         packet.write_string(&self.player_name);
 
         if let Some(server_addr) = &self.server_addr {

@@ -32,14 +32,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Connecting to server");
     let server_addr = "192.99.34.189:2342".parse::<SocketAddr>()?;
     let connect_data = ConnectData {
-        gamemode: 0,
-        gamemission: 0,
+        gamemode: 1, // Commercial
+        gamemission: 2, // Doom 2
         lowres_turn: 0,
-        drone: 1,
+        drone: 0,
         max_players: 4,
         is_freedoom: 0,
-        wad_sha1sum: [0; 20],
-        deh_sha1sum: [0; 20],
+        wad_sha1sum: [0; 20], // Replace with actual SHA1 sum if available
+        deh_sha1sum: [0; 20], // Replace with actual SHA1 sum if available
         player_class: 0,
     };
 

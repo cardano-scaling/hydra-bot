@@ -17,6 +17,11 @@ impl NetPacket {
         }
     }
 
+    /// Writes a blob of data to the packet.
+    pub fn write_blob(&mut self, data: &[u8]) {
+        self.data.extend_from_slice(data);
+    }
+
     /// Reads a ticcmd diff from the packet.
     fn read_ticcmd_diff(&mut self, lowres_turn: bool) -> Option<NetTicDiff> {
         let mut diff = NetTicDiff {
@@ -94,10 +99,6 @@ impl NetPacket {
     /// Writes an unsigned 32-bit integer in big-endian order to the packet.
     pub fn write_u32(&mut self, value: u32) {
         self.data.extend(&value.to_be_bytes());
-    }
-
-    fn write_blob(&mut self, buf: &[u8]) {
-        self.data.extend_from_slice(buf);
     }
 
     /// Writes a signed 32-bit integer in big-endian order to the packet.
