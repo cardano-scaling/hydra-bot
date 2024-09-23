@@ -1,7 +1,8 @@
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn, error};
-use std::net::UdpSocket;
+use std::net::{UdpSocket, SocketAddr};
 use std::sync::Arc;
+use std::io;
 
 use crate::net_packet::NetPacket;
 use crate::net_structs::*;
@@ -58,7 +59,7 @@ pub struct NetClient {
     recvwindow_cmd_base: Vec<TicCmd>,
     start_time: Instant,
     num_retries: u32,
-    socket: Option<Arc<UdpSocket>>,
+    socket: Arc<UdpSocket>,
 }
 
 impl NetClient {
@@ -74,9 +75,11 @@ impl NetClient {
 }
 
 impl NetClient {
-    pub fn new(player_name: String, drone: bool) -> Self {
+    pub fn new(player_name: String, drone: bool) -> io::Result<Self> {
         debug!("Creating new NetClient: player_name={}, drone={}", player_name, drone);
-        NetClient {
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        socket.set_nonblocking(true)?;
+        Ok(NetClient {
             connection: NetConnection::default(),
             state: ClientState::Disconnected,
             server_addr: None,
@@ -103,8 +106,8 @@ impl NetClient {
             recvwindow_cmd_base: vec![TicCmd::default(); NET_MAXPLAYERS],
             num_retries: 0,
             start_time: Instant::now(),
-            socket: None,
-        }
+            socket: Arc::new(socket),
+        })
     }
 
     pub fn get_reject_reason(&self) -> Option<&str> {
@@ -933,12 +936,12 @@ impl NetClient {
         packet.write_connect_data(data);
         packet.write_string(&self.player_name);
 
-        if let Some(socket) = &self.socket {
-            socket.send(&packet.data).map_err(|e| e.to_string())?;
+        if let Some(server_addr) = &self.server_addr {
+            self.socket.send_to(&packet.data, server_addr.socket_addr).map_err(|e| e.to_string())?;
             debug!("SYN sent to server");
             Ok(())
         } else {
-            Err("Socket not initialized".to_string())
+            Err("Server address not set".to_string())
         }
     }
 

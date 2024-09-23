@@ -17,7 +17,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     info!("Initializing client");
-    let mut client = NetClient::new("Player1".to_string(), false);
+    let mut client = match NetClient::new("Player1".to_string(), false) {
+        Ok(client) => client,
+        Err(e) => {
+            error!("Failed to initialize client: {}", e);
+            return Err(e.into());
+        }
+    };
     client.init();
 
     info!("Initializing game");
