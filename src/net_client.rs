@@ -436,7 +436,7 @@ impl NetClient {
         packet.write_u8((self.recv_window_start & 0xff) as u8);
 
         self.connection
-            .send_packet(&mut packet, self.server_addr.as_ref().unwrap());
+            .send_packet(&packet, self.server_addr.as_ref().unwrap());
         self.need_acknowledge = false;
         println!("Client: Game data acknowledgment sent");
     }
@@ -463,7 +463,7 @@ impl NetClient {
         }
 
         self.connection
-            .send_packet(&mut packet, self.server_addr.as_ref().unwrap());
+            .send_packet(&packet, self.server_addr.as_ref().unwrap());
         self.need_acknowledge = false;
         println!("Client: Sent tics from {} to {}", start, end);
     }
@@ -749,7 +749,7 @@ impl NetClient {
         let mut packet = NetPacket::new();
         packet.write_u16(NET_PACKET_TYPE_GAMESTART);
         packet.write_settings(settings);
-        self.connection.send_reliable_packet(&mut packet);
+        self.connection.send_reliable_packet(&packet);
     }
 
     pub fn connect(&mut self, addr: NetAddr, connect_data: ConnectData) -> bool {
@@ -812,7 +812,7 @@ impl NetClient {
         packet.write_string(&self.player_name);
 
         self.connection
-            .send_packet(&mut packet, self.server_addr.as_ref().unwrap());
+            .send_packet(&packet, self.server_addr.as_ref().unwrap());
         println!("Client: SYN sent");
     }
 }
