@@ -96,6 +96,8 @@ impl NetClient {
             last_send_time: Instant::now(),
             last_ticcmd: TicCmd::default(),
             recvwindow_cmd_base: vec![TicCmd::default(); NET_MAXPLAYERS],
+            num_retries: 0,
+            start_time: Instant::now(),
         }
     }
 
@@ -142,19 +144,54 @@ impl NetClient {
 
         self.connection.run();
 
-        if self.connection.state == ConnectionState::Disconnected
-            || self.connection.state == ConnectionState::DisconnectedSleep
-        {
-            self.handle_disconnected();
+        match self.state {
+            ClientState::Connecting => {
+                if Instant::now().duration_since(self.start_time) > Duration::from_secs(120) {
+                    self.handle_connection_timeout();
+                }
+            }
+            ClientState::Connected | ClientState::WaitingLaunch => {
+                self.net_waiting_for_launch = true;
+            }
+            ClientState::InGame => {
+                self.advance_window();
+                self.check_resends();
+            }
+            ClientState::Disconnecting => {
+                if Instant::now().duration_since(self.start_time) > Duration::from_secs(5) {
+                    self.handle_disconnection_timeout();
+                }
+            }
+            _ => {}
         }
 
-        if self.state == ClientState::InGame {
-            self.advance_window();
-            self.check_resends();
-        }
+        // Send keepalive if needed
+        self.send_keepalive();
+    }
 
-        self.net_waiting_for_launch = self.connection.state == ConnectionState::Connected
-            && self.state == ClientState::WaitingLaunch;
+    fn handle_connection_timeout(&mut self) {
+        self.reject_reason = Some("Connection attempt timed out".to_string());
+        self.state = ClientState::Disconnected;
+        self.shutdown();
+    }
+
+    fn handle_disconnection_timeout(&mut self) {
+        println!("Client: Disconnection timed out");
+        self.state = ClientState::Disconnected;
+        self.shutdown();
+    }
+
+    fn send_keepalive(&mut self) {
+        if self.state == ClientState::Connected || self.state == ClientState::InGame {
+            let now = Instant::now();
+            if now.duration_since(self.last_send_time) > Duration::from_secs(1) {
+                let mut packet = NetPacket::new();
+                packet.write_u16(NET_PACKET_TYPE_GAMEDATA_ACK);
+                packet.write_u8((self.recv_window_start & 0xff) as u8);
+                self.connection.send_packet(&packet, self.server_addr.as_ref().unwrap());
+                self.last_send_time = now;
+            }
+        }
     }
 
     fn handle_disconnected(&mut self) {
@@ -857,29 +894,7 @@ impl NetClient {
         println!("Client: SYN sent");
     }
 
-    fn parse_syn(&mut self, packet: &mut NetPacket) {
-        println!("Client: Processing SYN response");
-        let server_version = packet.read_safe_string().unwrap_or_default();
-        let protocol = packet.read_protocol();
-
-        if protocol == NetProtocol::Unknown {
-            println!("Client: Error: No common protocol");
-            return;
-        }
-
-        println!("Client: Connected to server");
-        self.state = ClientState::Connected;
-        self.connection.protocol = protocol;
-
-        if server_version != env!("CARGO_PKG_VERSION") {
-            println!(
-                "Client: Warning: This is '{}', but the server is '{}'. \
-                It is possible that this mismatch may cause the game to desynchronize.",
-                env!("CARGO_PKG_VERSION"),
-                server_version
-            );
-        }
-    }
+    // This function is already defined earlier in the file, so we'll remove this duplicate.
 }
 
 #[cfg(test)]
