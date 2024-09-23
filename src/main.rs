@@ -5,12 +5,12 @@ mod net_client;
 mod net_packet;
 mod net_structs;
 
-use tracing::{info, debug, error, warn};
 use std::net::SocketAddr;
 use tokio::time::{sleep, Duration};
+use tracing::{debug, error, info, warn};
 
-use self::net_client::NetClient;
 use self::game::Game;
+use self::net_client::NetClient;
 use self::net_structs::{ConnectData, NetAddr};
 
 #[tokio::main]
@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut game = Game::new();
 
     info!("Connecting to server");
-    let server_addr = "127.0.0.1:2342".parse::<SocketAddr>()?;
+    let server_addr = "97.94.129.234:2342".parse::<SocketAddr>()?;
     let connect_data = ConnectData {
         gamemode: 0,
         gamemission: 0,
@@ -43,13 +43,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_error = String::new();
 
     while retry_count < max_retries {
-        match client.connect(NetAddr::from(server_addr), connect_data.clone()).await {
+        match client
+            .connect(NetAddr::from(server_addr), connect_data)
+            .await
+        {
             Ok(_) => {
                 info!("Connected to server successfully");
                 break;
             }
             Err(e) => {
-                warn!("Failed to connect to server (attempt {}/{}): {}", retry_count + 1, max_retries, e);
+                warn!(
+                    "Failed to connect to server (attempt {}/{}): {}",
+                    retry_count + 1,
+                    max_retries,
+                    e
+                );
                 last_error = e;
                 retry_count += 1;
                 if retry_count < max_retries {
@@ -60,7 +68,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if retry_count == max_retries {
-        error!("Failed to connect to server after {} attempts. Last error: {}", max_retries, last_error);
+        error!(
+            "Failed to connect to server after {} attempts. Last error: {}",
+            max_retries, last_error
+        );
         return Err(last_error.into());
     }
 
