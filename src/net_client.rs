@@ -838,7 +838,7 @@ impl NetClient {
         self.connection.send_reliable_packet(&packet);
     }
 
-    pub fn connect(&mut self, addr: NetAddr, connect_data: ConnectData) -> bool {
+    pub async fn connect(&mut self, addr: NetAddr, connect_data: ConnectData) -> Result<(), String> {
         self.server_addr = Some(addr.clone());
         self.connection.init_client(&addr, &connect_data);
 
@@ -867,9 +867,10 @@ impl NetClient {
             }
 
             if now.duration_since(self.start_time) > Duration::from_secs(30) {
-                self.reject_reason = Some("No response from server".to_string());
-                warn!("Connection timed out after 30 seconds");
-                break;
+                let error_msg = "Connection timed out after 30 seconds".to_string();
+                self.reject_reason = Some(error_msg.clone());
+                warn!("{}", error_msg);
+                return Err(error_msg);
             }
 
             self.run();
@@ -881,7 +882,7 @@ impl NetClient {
             }
 
             // Don't hog the CPU
-            std::thread::sleep(Duration::from_millis(10));
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
         if self.state == ClientState::Connected {
@@ -889,11 +890,12 @@ impl NetClient {
             self.reject_reason = None;
             self.state = ClientState::WaitingLaunch;
             self.drone = connect_data.drone != 0;
-            true
+            Ok(())
         } else {
-            warn!("Connection failed. Reason: {:?}", self.reject_reason);
+            let error_msg = format!("Connection failed. Reason: {:?}", self.reject_reason);
+            warn!("{}", error_msg);
             self.shutdown();
-            false
+            Err(error_msg)
         }
     }
 

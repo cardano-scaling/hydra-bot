@@ -7,12 +7,14 @@ mod net_structs;
 
 use tracing::{info, debug, error};
 use std::net::SocketAddr;
+use tokio::time::{sleep, Duration};
 
 use self::net_client::NetClient;
 use self::game::Game;
 use self::net_structs::{ConnectData, NetAddr};
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     info!("Initializing client");
@@ -23,7 +25,7 @@ fn main() {
     let mut game = Game::new();
 
     info!("Connecting to server");
-    let server_addr = "127.0.0.1:2342".parse::<SocketAddr>().unwrap();
+    let server_addr = "127.0.0.1:2342".parse::<SocketAddr>()?;
     let connect_data = ConnectData {
         gamemode: 0,
         gamemission: 0,
@@ -36,11 +38,12 @@ fn main() {
         player_class: 0,
     };
 
-    if client.connect(NetAddr::from(server_addr), connect_data) {
-        info!("Connected to server successfully");
-    } else {
-        error!("Failed to connect to server");
-        return;
+    match client.connect(NetAddr::from(server_addr), connect_data).await {
+        Ok(_) => info!("Connected to server successfully"),
+        Err(e) => {
+            error!("Failed to connect to server: {}", e);
+            return Err(e.into());
+        }
     }
 
     info!("Client and game initialized, starting main loop");
@@ -51,7 +54,7 @@ fn main() {
         game.try_run_tics(&mut client);
 
         // Add some delay to prevent busy-waiting
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        sleep(Duration::from_millis(10)).await;
         debug!("Completed a game loop iteration");
     }
 }
