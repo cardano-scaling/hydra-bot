@@ -49,8 +49,7 @@ pub struct ConnectData {
     pub player_class: i32,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct GameSettings {
     pub ticdup: i32,
     pub extratics: i32,
@@ -137,8 +136,7 @@ pub struct NetAddr {
     pub handle: *mut c_void,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NetContext {
     // Define fields as necessary
 }
@@ -302,7 +300,7 @@ impl Default for NetServerRecv {
         Self {
             active: false,
             resend_time: Instant::now(),
-            cmd: Default::default()
+            cmd: Default::default(),
         }
     }
 }
@@ -321,7 +319,7 @@ impl Default for NetServerSend {
             active: false,
             seq: 0,
             time: Instant::now(),
-            cmd: Default::default()
+            cmd: Default::default(),
         }
     }
 }

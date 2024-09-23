@@ -419,7 +419,7 @@ impl NetClient {
         packet.write_u8((end - start + 1) as u8);
 
         self.connection
-            .send_packet(&mut packet, self.server_addr.as_ref().unwrap());
+            .send_packet(&packet, self.server_addr.as_ref().unwrap());
 
         let now = Instant::now();
         for i in start..=end {
@@ -455,7 +455,10 @@ impl NetClient {
         for tic in start..=end {
             if let Some(send_obj) = self.send_queue.get(tic as usize % BACKUPTICS) {
                 packet.write_i16(self.last_latency.try_into().unwrap());
-                packet.write_ticcmd_diff(&send_obj.cmd, self.settings.as_ref().unwrap().lowres_turn != 0);
+                packet.write_ticcmd_diff(
+                    &send_obj.cmd,
+                    self.settings.as_ref().unwrap().lowres_turn != 0,
+                );
             }
         }
 
@@ -731,13 +734,13 @@ impl NetClient {
         if self.state != ClientState::InGame {
             return None;
         }
-        self.settings.clone()
+        self.settings
     }
 
     pub fn launch_game(&mut self) {
         let mut packet = NetPacket::new();
         packet.write_u16(NET_PACKET_TYPE_LAUNCH);
-        self.connection.send_reliable_packet(&mut packet);
+        self.connection.send_reliable_packet(&packet);
     }
 
     pub fn start_game(&mut self, settings: &GameSettings) {
@@ -822,6 +825,6 @@ mod tests {
     fn test_client_initialization() {
         let client = NetClient::new("Player1".to_string(), false);
         assert_eq!(client.player_name, "Player1");
-        assert_eq!(client.drone, false);
+        assert!(!client.drone);
     }
 }
