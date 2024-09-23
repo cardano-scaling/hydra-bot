@@ -43,6 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_error = String::new();
 
     while retry_count < max_retries {
+        info!("Attempting to connect (attempt {}/{})", retry_count + 1, max_retries);
         match client
             .connect(NetAddr::from(server_addr), connect_data)
             .await
@@ -61,6 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 last_error = e;
                 retry_count += 1;
                 if retry_count < max_retries {
+                    info!("Waiting 2 seconds before next attempt...");
                     sleep(Duration::from_secs(2)).await;
                 }
             }
@@ -73,6 +75,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_retries, last_error
         );
         return Err(last_error.into());
+    }
+
+    // Check if we're actually connected
+    if !client.is_connected() {
+        error!("Connection process completed, but client is not connected");
+        return Err("Failed to establish connection".into());
     }
 
     info!("Client and game initialized, starting main loop");

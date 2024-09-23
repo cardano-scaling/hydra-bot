@@ -260,12 +260,14 @@ impl NetClient {
 
         if protocol == NetProtocol::Unknown {
             error!("No common protocol");
+            self.reject_reason = Some("No common protocol".to_string());
             return;
         }
 
         info!("Connected to server");
         self.connection.state = ConnectionState::Connected;
         self.connection.protocol = protocol;
+        self.state = ClientState::Connected;
 
         if server_version != env!("CARGO_PKG_VERSION") {
             warn!(
@@ -850,7 +852,7 @@ impl NetClient {
         self.net_local_deh_sha1sum.copy_from_slice(&connect_data.deh_sha1sum);
         self.net_local_is_freedoom = connect_data.is_freedoom != 0;
 
-        self.net_client_connected = false;  // Set to false until we're actually connected
+        self.net_client_connected = false;
         self.net_client_received_wait_data = false;
 
         self.start_time = Instant::now();
@@ -885,27 +887,28 @@ impl NetClient {
                     self.run();
 
                     // Check for incoming packets
-                    if let Some((_, packet)) = self.context.recv_packet() {
+                    while let Some((_, mut packet)) = self.context.recv_packet() {
                         debug!("Received packet: {:?}", packet);
-                        self.parse_packet(&mut packet.clone());
+                        self.parse_packet(&mut packet);
+                        
+                        // Check if we've transitioned to Connected state
+                        if self.state == ClientState::Connected {
+                            info!("Successfully connected");
+                            self.reject_reason = None;
+                            self.state = ClientState::WaitingLaunch;
+                            self.drone = connect_data.drone != 0;
+                            self.net_client_connected = true;
+                            return Ok(());
+                        }
                     }
                 }
             }
         }
 
-        if self.state == ClientState::Connected {
-            info!("Successfully connected");
-            self.reject_reason = None;
-            self.state = ClientState::WaitingLaunch;
-            self.drone = connect_data.drone != 0;
-            self.net_client_connected = true;
-            Ok(())
-        } else {
-            let error_msg = format!("Connection failed. Reason: {:?}", self.reject_reason);
-            warn!("{}", error_msg);
-            self.shutdown();
-            Err(error_msg)
-        }
+        let error_msg = format!("Connection failed. Reason: {:?}", self.reject_reason);
+        warn!("{}", error_msg);
+        self.shutdown();
+        Err(error_msg)
     }
 
     fn send_syn(&self, data: &ConnectData) -> Result<(), String> {
