@@ -13,8 +13,7 @@ use self::game::Game;
 use self::net_client::NetClient;
 use self::net_structs::{ConnectData, NetAddr};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     info!("Initializing client");
@@ -38,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         player_class: 0,
     };
 
-    match client.connect(NetAddr::from(server_addr), connect_data).await {
+    match client.connect(NetAddr::from(server_addr), connect_data) {
         Ok(_) => {
             info!("Connected to server successfully");
         }
@@ -65,10 +64,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         game.try_run_tics(&mut client);
 
         // Run the client
-        client.run().await;
+        client.run();
 
         // Add some delay to prevent busy-waiting
-        sleep(Duration::from_millis(10)).await;
+        std::thread::sleep(Duration::from_millis(10));
         debug!("Completed a game loop iteration");
 
         // Check if the client is still connected

@@ -142,15 +142,15 @@ impl NetClient {
         pet_names[rand::random::<usize>() % pet_names.len()].to_string()
     }
 
-    pub async fn run(&mut self) {
+    pub fn run(&mut self) {
         self.run_bot();
 
         if !self.net_client_connected {
             return;
         }
 
-        if let Some(packet) = self.recv_packet().await {
-            self.parse_packet(&packet);
+        if let Some(mut packet) = self.recv_packet() {
+            self.parse_packet(&mut packet);
         }
 
         self.connection.run();
@@ -851,15 +851,10 @@ impl NetClient {
         self.connection.send_reliable_packet(&packet);
     }
 
-    pub async fn connect(&mut self, addr: NetAddr, connect_data: ConnectData) -> Result<(), String> {
+    pub fn connect(&mut self, addr: NetAddr, connect_data: ConnectData) -> Result<(), String> {
         debug!("Attempting to connect to server at {:?}", addr);
         self.server_addr = Some(addr.clone());
         self.connection.init_client(&addr, &connect_data);
-
-        // Create and bind the UDP socket
-        let socket = UdpSocket::bind("0.0.0.0:0").await.map_err(|e| e.to_string())?;
-        socket.connect(addr.socket_addr).await.map_err(|e| e.to_string())?;
-        self.socket = Some(Arc::new(socket));
 
         self.state = ClientState::Connecting;
         self.reject_reason = Some("Unknown reason".to_string());
@@ -876,57 +871,54 @@ impl NetClient {
         self.num_retries = 0;
 
         let timeout = Duration::from_secs(30);
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
         let max_retries = 5;
 
         while self.state == ClientState::Connecting {
-            tokio::select! {
-                _ = interval.tick() => {
-                    if self.start_time.elapsed() > timeout {
-                        let error_msg = "Connection timed out after 30 seconds".to_string();
-                        self.reject_reason = Some(error_msg.clone());
-                        warn!("{}", error_msg);
-                        return Err(error_msg);
-                    }
+            if self.start_time.elapsed() > timeout {
+                let error_msg = "Connection timed out after 30 seconds".to_string();
+                self.reject_reason = Some(error_msg.clone());
+                warn!("{}", error_msg);
+                return Err(error_msg);
+            }
 
-                    if self.num_retries >= max_retries {
-                        let error_msg = format!("Connection failed after {} retries", max_retries);
-                        self.reject_reason = Some(error_msg.clone());
-                        warn!("{}", error_msg);
-                        return Err(error_msg);
-                    }
+            if self.num_retries >= max_retries {
+                let error_msg = format!("Connection failed after {} retries", max_retries);
+                self.reject_reason = Some(error_msg.clone());
+                warn!("{}", error_msg);
+                return Err(error_msg);
+            }
 
-                    match self.send_syn(&connect_data).await {
-                        Ok(_) => {
-                            self.num_retries += 1;
-                            debug!("Sent SYN packet. Retry count: {}", self.num_retries);
-                        },
-                        Err(e) => {
-                            warn!("Failed to send SYN packet: {}", e);
-                            return Err(format!("Failed to send SYN packet: {}", e));
-                        }
-                    }
-                }
-                _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                    self.run().await;
-
-                    // Check for incoming packets
-                    if let Some(packet) = self.recv_packet().await {
-                        debug!("Received packet: {:?}", packet);
-                        self.parse_packet(&packet);
-                        
-                        // Check if we've transitioned to Connected state
-                        if self.state == ClientState::Connected {
-                            info!("Successfully connected");
-                            self.reject_reason = None;
-                            self.state = ClientState::WaitingLaunch;
-                            self.drone = connect_data.drone != 0;
-                            self.net_client_connected = true;
-                            return Ok(());
-                        }
-                    }
+            match self.send_syn(&connect_data) {
+                Ok(_) => {
+                    self.num_retries += 1;
+                    debug!("Sent SYN packet. Retry count: {}", self.num_retries);
+                },
+                Err(e) => {
+                    warn!("Failed to send SYN packet: {}", e);
+                    return Err(format!("Failed to send SYN packet: {}", e));
                 }
             }
+
+            self.run();
+
+            // Check for incoming packets
+            if let Some(mut packet) = self.recv_packet() {
+                debug!("Received packet: {:?}", packet);
+                self.parse_packet(&mut packet);
+                
+                // Check if we've transitioned to Connected state
+                if self.state == ClientState::Connected {
+                    info!("Successfully connected");
+                    self.reject_reason = None;
+                    self.state = ClientState::WaitingLaunch;
+                    self.drone = connect_data.drone != 0;
+                    self.net_client_connected = true;
+                    return Ok(());
+                }
+            }
+
+            // Add a small delay to prevent busy-waiting
+            std::thread::sleep(Duration::from_millis(100));
         }
 
         let error_msg = format!("Connection failed. Reason: {:?}", self.reject_reason);
@@ -982,20 +974,11 @@ mod tests {
         assert!(!client.drone);
     }
 }
-    async fn recv_packet(&self) -> Option<NetPacket> {
-        if let Some(socket) = &self.socket {
-            let mut buf = [0u8; 1024];
-            match socket.recv(&mut buf).await {
-                Ok(size) => {
-                    let mut packet = NetPacket::new();
-                    packet.data.extend_from_slice(&buf[..size]);
-                    Some(packet)
-                }
-                Err(e) => {
-                    debug!("Error receiving packet: {}", e);
-                    None
-                }
-            }
+    fn recv_packet(&mut self) -> Option<NetPacket> {
+        if let Some((addr, packet)) = self.context.recv_packet() {
+            // Update the server address if it has changed
+            self.server_addr = Some(addr);
+            Some(packet)
         } else {
             None
         }
