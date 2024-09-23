@@ -18,8 +18,11 @@ fn main() {
 
     info!("Client initialized, starting main loop");
 
+    d_loop::init();
+    d_loop::d_start_game_loop();
+
     loop {
-        client.run();
+        d_loop::try_run_tics(&mut client);
 
         // Add some delay to prevent busy-waiting
         std::thread::sleep(std::time::Duration::from_millis(10));
