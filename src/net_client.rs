@@ -13,15 +13,19 @@ const NET_PACKET_TYPE_GAMEDATA: u16 = 5;
 const NET_PACKET_TYPE_GAMEDATA_ACK: u16 = 6;
 const NET_PACKET_TYPE_GAMEDATA_RESEND: u16 = 7;
 const NET_PACKET_TYPE_CONSOLE_MESSAGE: u16 = 8;
+const NET_PACKET_TYPE_DISCONNECT: u16 = 9;
+const NET_PACKET_TYPE_DISCONNECT_ACK: u16 = 10;
 const NET_MAGIC_NUMBER: u32 = 1454104972;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ClientState {
     Disconnected,
+    Connecting,
+    Connected,
     WaitingLaunch,
     WaitingStart,
     InGame,
-    DisconnectedSleep,
+    Disconnecting,
 }
 
 pub struct NetClient {
@@ -49,6 +53,8 @@ pub struct NetClient {
     last_send_time: Instant,
     last_ticcmd: TicCmd,
     recvwindow_cmd_base: Vec<TicCmd>,
+    start_time: Instant,
+    num_retries: u32,
 }
 
 impl NetClient {
@@ -176,8 +182,31 @@ impl NetClient {
             NET_PACKET_TYPE_GAMEDATA => self.parse_game_data(packet),
             NET_PACKET_TYPE_GAMEDATA_RESEND => self.parse_resend_request(packet),
             NET_PACKET_TYPE_CONSOLE_MESSAGE => self.parse_console_message(packet),
+            NET_PACKET_TYPE_DISCONNECT => self.parse_disconnect(packet),
+            NET_PACKET_TYPE_DISCONNECT_ACK => self.parse_disconnect_ack(packet),
             _ => println!("Unknown packet type: {}", packet_type),
         }
+    }
+
+    fn parse_disconnect(&mut self, packet: &mut NetPacket) {
+        println!("Client: Received disconnect request from server");
+        self.send_disconnect_ack();
+        self.state = ClientState::Disconnected;
+        self.shutdown();
+    }
+
+    fn parse_disconnect_ack(&mut self, packet: &mut NetPacket) {
+        if self.state == ClientState::Disconnecting {
+            println!("Client: Received disconnect acknowledgement");
+            self.state = ClientState::Disconnected;
+            self.shutdown();
+        }
+    }
+
+    fn send_disconnect_ack(&self) {
+        let mut packet = NetPacket::new();
+        packet.write_u16(NET_PACKET_TYPE_DISCONNECT_ACK);
+        self.connection.send_packet(&packet, self.server_addr.as_ref().unwrap());
     }
 
     fn parse_syn(&mut self, packet: &mut NetPacket) {
@@ -717,20 +746,24 @@ impl NetClient {
         }
 
         println!("Client: Beginning disconnect");
-        self.connection.disconnect();
+        self.state = ClientState::Disconnecting;
+        self.start_time = Instant::now();
 
-        let start_time = Instant::now();
-        while self.connection.state != ConnectionState::Disconnected
-            && self.connection.state != ConnectionState::DisconnectedSleep
-        {
-            if start_time.elapsed() > Duration::from_secs(5) {
+        let mut packet = NetPacket::new();
+        packet.write_u16(NET_PACKET_TYPE_DISCONNECT);
+        self.connection.send_packet(&packet, self.server_addr.as_ref().unwrap());
+
+        while self.state == ClientState::Disconnecting {
+            self.run();
+
+            if self.start_time.elapsed() > Duration::from_secs(5) {
                 println!("Client: No acknowledgment of disconnect received");
-                self.state = ClientState::WaitingStart;
-                eprintln!("NET_CL_Disconnect: Timeout while disconnecting from server");
+                self.state = ClientState::Disconnected;
                 break;
             }
 
-            self.run();
+            // Don't hog the CPU
+            std::thread::sleep(Duration::from_millis(1));
         }
 
         println!("Client: Disconnect complete");
@@ -763,7 +796,7 @@ impl NetClient {
         self.server_addr = Some(addr.clone());
         self.connection.init_client(&addr, &connect_data);
 
-        self.state = ClientState::Disconnected;
+        self.state = ClientState::Connecting;
         self.reject_reason = Some("Unknown reason".to_string());
 
         self.net_local_wad_sha1sum.copy_from_slice(&connect_data.wad_sha1sum);
@@ -773,26 +806,31 @@ impl NetClient {
         self.net_client_connected = true;
         self.net_client_received_wait_data = false;
 
-        let start_time = Instant::now();
+        self.start_time = Instant::now();
         self.last_send_time = Instant::now() - Duration::from_secs(1);
+        self.num_retries = 0;
 
-        while self.connection.state == ConnectionState::Connecting {
+        while self.state == ClientState::Connecting {
             let now = Instant::now();
 
             if now.duration_since(self.last_send_time) > Duration::from_secs(1) {
                 self.send_syn(&connect_data);
                 self.last_send_time = now;
+                self.num_retries += 1;
             }
 
-            if now.duration_since(start_time) > Duration::from_secs(120) {
+            if now.duration_since(self.start_time) > Duration::from_secs(120) {
                 self.reject_reason = Some("No response from server".to_string());
                 break;
             }
 
             self.run();
+
+            // Don't hog the CPU
+            std::thread::sleep(Duration::from_millis(1));
         }
 
-        if self.connection.state == ConnectionState::Connected {
+        if self.state == ClientState::Connected {
             println!("Client: Successfully connected");
             self.reject_reason = None;
             self.state = ClientState::WaitingLaunch;
@@ -817,6 +855,30 @@ impl NetClient {
         self.connection
             .send_packet(&packet, self.server_addr.as_ref().unwrap());
         println!("Client: SYN sent");
+    }
+
+    fn parse_syn(&mut self, packet: &mut NetPacket) {
+        println!("Client: Processing SYN response");
+        let server_version = packet.read_safe_string().unwrap_or_default();
+        let protocol = packet.read_protocol();
+
+        if protocol == NetProtocol::Unknown {
+            println!("Client: Error: No common protocol");
+            return;
+        }
+
+        println!("Client: Connected to server");
+        self.state = ClientState::Connected;
+        self.connection.protocol = protocol;
+
+        if server_version != env!("CARGO_PKG_VERSION") {
+            println!(
+                "Client: Warning: This is '{}', but the server is '{}'. \
+                It is possible that this mismatch may cause the game to desynchronize.",
+                env!("CARGO_PKG_VERSION"),
+                server_version
+            );
+        }
     }
 }
 
