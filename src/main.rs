@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut game = Game::new();
 
     info!("Connecting to server");
-    let server_addr = "127.0.0.1:2342".parse::<SocketAddr>()?;
+    let server_addr = "192.99.34.189:2342".parse::<SocketAddr>()?;
     let connect_data = ConnectData {
         gamemode: 0,
         gamemission: 0,
