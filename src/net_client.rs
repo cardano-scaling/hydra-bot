@@ -861,12 +861,20 @@ impl NetClient {
 
         let timeout = Duration::from_secs(30);
         let mut interval = tokio::time::interval(Duration::from_secs(1));
+        let max_retries = 5;
 
         while self.state == ClientState::Connecting {
             tokio::select! {
                 _ = interval.tick() => {
                     if self.start_time.elapsed() > timeout {
                         let error_msg = "Connection timed out after 30 seconds".to_string();
+                        self.reject_reason = Some(error_msg.clone());
+                        warn!("{}", error_msg);
+                        return Err(error_msg);
+                    }
+
+                    if self.num_retries >= max_retries {
+                        let error_msg = format!("Connection failed after {} retries", max_retries);
                         self.reject_reason = Some(error_msg.clone());
                         warn!("{}", error_msg);
                         return Err(error_msg);
@@ -883,7 +891,7 @@ impl NetClient {
                         }
                     }
                 }
-                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {
                     self.run();
 
                     // Check for incoming packets
