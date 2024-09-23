@@ -153,7 +153,7 @@ impl Game {
         let mut realtics;
         let mut availabletics;
         let mut counts;
-        let lowtic;
+        let mut lowtic;
 
         if self.singletics {
             self.build_new_tic(client);
@@ -278,7 +278,7 @@ impl Game {
         }
     }
 
-    fn single_player_clear(&mut self, set: &mut TiccmdSet) {
+    fn single_player_clear(&self, set: &mut TiccmdSet) {
         let localplayer = self.localplayer as usize;
         for i in 0..NET_MAXPLAYERS {
             if i != localplayer {
@@ -287,7 +287,7 @@ impl Game {
         }
     }
 
-    fn ticdup_squash(&self, set: &mut TiccmdSet) {
+    fn ticdup_squash(&mut self, set: &mut TiccmdSet) {
         for cmd in &mut set.cmds {
             cmd.chatchar = 0;
             if cmd.buttons & 0x80 != 0 { // 0x80 is the value for BT_SPECIAL
