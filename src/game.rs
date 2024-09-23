@@ -80,12 +80,12 @@ impl Game {
     fn build_new_tic(&mut self, client: &mut NetClient) -> bool {
         let gameticdiv = self.maketic / self.ticdup;
 
-        if client.is_drone() {
+        if client.drone {
             return false;
         }
 
         if self.new_sync {
-            if !client.is_connected() && self.maketic - gameticdiv > 2 {
+            if !client.net_client_connected && self.maketic - gameticdiv > 2 {
                 return false;
             }
 
@@ -100,7 +100,7 @@ impl Game {
         // TODO: Implement build_ticcmd
         // client.build_ticcmd(&mut cmd, self.maketic);
 
-        if client.is_connected() {
+        if client.net_client_connected {
             client.send_ticcmd(&cmd, self.maketic as u32);
         }
 
@@ -183,7 +183,7 @@ impl Game {
                 counts = 1;
             }
 
-            if client.is_connected() {
+            if client.net_client_connected {
                 self.old_net_sync();
             }
         }
@@ -217,7 +217,7 @@ impl Game {
 
             let set = &mut self.ticdata[(self.gametic / self.ticdup) as usize % BACKUPTICS];
 
-            if !client.is_connected() {
+            if !client.net_client_connected {
                 self.single_player_clear(set);
             }
 
@@ -271,10 +271,10 @@ impl Game {
     }
 
     fn players_in_game(&self, client: &NetClient) -> bool {
-        if client.is_connected() {
+        if client.net_client_connected {
             self.local_playeringame.iter().any(|&x| x)
         } else {
-            !client.is_drone()
+            !client.drone
         }
     }
 
@@ -290,7 +290,7 @@ impl Game {
     fn ticdup_squash(&self, set: &mut TiccmdSet) {
         for cmd in &mut set.cmds {
             cmd.chatchar = 0;
-            if cmd.buttons & crate::net_structs::BT_SPECIAL != 0 {
+            if cmd.buttons & 0x80 != 0 { // 0x80 is the value for BT_SPECIAL
                 cmd.buttons = 0;
             }
         }

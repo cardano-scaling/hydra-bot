@@ -22,6 +22,8 @@ pub const NET_TICDIFF_CHATCHAR: u32 = 1 << 5;
 pub const NET_TICDIFF_RAVEN: u32 = 1 << 6;
 pub const NET_TICDIFF_STRIFE: u32 = 1 << 7;
 
+pub const BT_SPECIAL: u8 = 0x80;
+
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct TicCmd {
     pub forwardmove: i8,
