@@ -6,7 +6,7 @@ mod net_packet;
 mod net_structs;
 
 use std::net::SocketAddr;
-use tokio::time::{sleep, Duration};
+use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use self::game::Game;
