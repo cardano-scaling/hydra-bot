@@ -5,7 +5,7 @@ mod net_client;
 mod net_packet;
 mod net_structs;
 
-use tracing::info;
+use tracing::{info, debug, error};
 use std::net::SocketAddr;
 
 use self::net_client::NetClient;
@@ -39,7 +39,7 @@ fn main() {
     if client.connect(NetAddr::from(server_addr), connect_data) {
         info!("Connected to server successfully");
     } else {
-        info!("Failed to connect to server");
+        error!("Failed to connect to server");
         return;
     }
 
@@ -52,5 +52,6 @@ fn main() {
 
         // Add some delay to prevent busy-waiting
         std::thread::sleep(std::time::Duration::from_millis(10));
+        debug!("Completed a game loop iteration");
     }
 }

@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use tracing::{debug, info, warn};
 use crate::net_structs::{TicCmd, GameSettings, NET_MAXPLAYERS, BACKUPTICS};
 use crate::net_client::NetClient;
 
@@ -37,7 +38,7 @@ pub struct Game {
 impl Game {
     pub fn new() -> Self {
         let uid = rand::random::<u32>() % 0xfffe;
-        println!("doom: 8, uid is {}", uid);
+        debug!("doom: 8, uid is {}", uid);
 
         Game {
             instance_uid: uid,
@@ -202,6 +203,7 @@ impl Game {
 
             if lowtic < self.gametic / self.ticdup + counts {
                 if self.get_adjusted_time() / self.ticdup as u32 - enter_tic as u32 >= MAX_NETGAME_STALL_TICS {
+                    warn!("Network stall detected");
                     return;
                 }
 
@@ -236,6 +238,7 @@ impl Game {
             self.net_update(client);
             counts -= 1;
         }
+        debug!("Finished running tics. New gametic: {}", self.gametic);
     }
 
     fn get_low_tic(&self) -> i32 {

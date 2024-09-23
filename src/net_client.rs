@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use tracing::{debug, info, warn, error};
 
 use crate::net_packet::NetPacket;
 use crate::net_structs::*;
@@ -71,6 +72,7 @@ impl NetClient {
 
 impl NetClient {
     pub fn new(player_name: String, drone: bool) -> Self {
+        debug!("Creating new NetClient: player_name={}, drone={}", player_name, drone);
         NetClient {
             connection: NetConnection::default(),
             state: ClientState::Disconnected,
@@ -102,6 +104,7 @@ impl NetClient {
     }
 
     pub fn init(&mut self) {
+        debug!("Initializing NetClient");
         self.init_bot();
         self.net_client_connected = false;
         self.net_client_received_wait_data = false;
@@ -115,10 +118,12 @@ impl NetClient {
                     .unwrap_or_else(|_| NetClient::get_random_pet_name())
             });
         }
+        debug!("Player name set to: {}", self.player_name);
     }
 
     fn init_bot(&mut self) {
         if self.drone {
+            debug!("Initializing bot-specific settings");
             // Initialize bot-specific settings
             // For example, set bot skill level
         }
@@ -170,13 +175,14 @@ impl NetClient {
     }
 
     fn handle_connection_timeout(&mut self) {
+        warn!("Connection attempt timed out");
         self.reject_reason = Some("Connection attempt timed out".to_string());
         self.state = ClientState::Disconnected;
         self.shutdown();
     }
 
     fn handle_disconnection_timeout(&mut self) {
-        println!("Client: Disconnection timed out");
+        warn!("Disconnection timed out");
         self.state = ClientState::Disconnected;
         self.shutdown();
     }
@@ -210,6 +216,7 @@ impl NetClient {
     fn parse_packet(&mut self, packet: &mut NetPacket) {
         let packet_type = packet.read_u16().unwrap();
 
+        debug!("Parsing packet of type: {}", packet_type);
         match packet_type {
             NET_PACKET_TYPE_SYN => self.parse_syn(packet),
             NET_PACKET_TYPE_REJECTED => self.parse_reject(packet),
@@ -221,12 +228,12 @@ impl NetClient {
             NET_PACKET_TYPE_CONSOLE_MESSAGE => self.parse_console_message(packet),
             NET_PACKET_TYPE_DISCONNECT => self.parse_disconnect(packet),
             NET_PACKET_TYPE_DISCONNECT_ACK => self.parse_disconnect_ack(packet),
-            _ => println!("Unknown packet type: {}", packet_type),
+            _ => warn!("Unknown packet type: {}", packet_type),
         }
     }
 
     fn parse_disconnect(&mut self, packet: &mut NetPacket) {
-        println!("Client: Received disconnect request from server");
+        info!("Received disconnect request from server");
         self.send_disconnect_ack();
         self.state = ClientState::Disconnected;
         self.shutdown();
@@ -234,7 +241,7 @@ impl NetClient {
 
     fn parse_disconnect_ack(&mut self, packet: &mut NetPacket) {
         if self.state == ClientState::Disconnecting {
-            println!("Client: Received disconnect acknowledgement");
+            info!("Received disconnect acknowledgement");
             self.state = ClientState::Disconnected;
             self.shutdown();
         }
@@ -247,23 +254,23 @@ impl NetClient {
     }
 
     fn parse_syn(&mut self, packet: &mut NetPacket) {
-        println!("Client: Processing SYN response");
+        debug!("Processing SYN response");
         let server_version = packet.read_safe_string().unwrap_or_default();
         let protocol = packet.read_protocol();
 
         if protocol == NetProtocol::Unknown {
-            println!("Client: Error: No common protocol");
+            error!("No common protocol");
             return;
         }
 
-        println!("Client: Connected to server");
+        info!("Connected to server");
         self.connection.state = ConnectionState::Connected;
         self.connection.protocol = protocol;
 
         if server_version != env!("CARGO_PKG_VERSION") {
-            println!(
-                "Client: Warning: This is '{}', but the server is '{}'. \
-                It is possible that this mismatch may cause the game to desynchronize.",
+            warn!(
+                "Version mismatch: Client is '{}', but the server is '{}'. \
+                This mismatch may cause the game to desynchronize.",
                 env!("CARGO_PKG_VERSION"),
                 server_version
             );
@@ -273,6 +280,7 @@ impl NetClient {
     fn parse_reject(&mut self, packet: &mut NetPacket) {
         if let Some(msg) = packet.read_safe_string() {
             if self.connection.state == ConnectionState::Connecting {
+                warn!("Connection rejected: {}", msg);
                 self.connection.state = ConnectionState::Disconnected;
                 self.reject_reason = Some(msg);
             }
@@ -301,32 +309,32 @@ impl NetClient {
     }
 
     fn parse_launch(&mut self, packet: &mut NetPacket) {
-        println!("Client: Processing launch packet");
+        debug!("Processing launch packet");
         if self.state != ClientState::WaitingLaunch {
-            println!("Client: Error: Not in waiting launch state");
+            warn!("Error: Not in waiting launch state");
             return;
         }
 
         if let Some(num_players) = packet.read_u8() {
             self.net_client_wait_data.num_players = num_players as i32;
             self.state = ClientState::WaitingStart;
-            println!("Client: Now waiting to start the game");
+            info!("Now waiting to start the game");
         }
     }
 
     fn parse_game_start(&mut self, packet: &mut NetPacket) {
-        println!("Client: Processing game start packet");
+        debug!("Processing game start packet");
         if let Some(settings) = packet.read_settings() {
             if self.state != ClientState::WaitingStart {
-                println!("Client: Error: Not in waiting start state");
+                warn!("Error: Not in waiting start state");
                 return;
             }
 
             if settings.num_players > NET_MAXPLAYERS as i32
                 || settings.consoleplayer as usize >= settings.num_players as usize
             {
-                println!(
-                    "Client: Error: Invalid settings, num_players={}, consoleplayer={}",
+                error!(
+                    "Invalid settings, num_players={}, consoleplayer={}",
                     settings.num_players, settings.consoleplayer
                 );
                 return;
@@ -335,14 +343,14 @@ impl NetClient {
             if (self.drone && settings.consoleplayer >= 0)
                 || (!self.drone && settings.consoleplayer < 0)
             {
-                println!(
-                    "Client: Error: Mismatch: drone={}, consoleplayer={}",
+                error!(
+                    "Mismatch: drone={}, consoleplayer={}",
                     self.drone, settings.consoleplayer
                 );
                 return;
             }
 
-            println!("Client: Initiating game state");
+            info!("Initiating game state");
             self.state = ClientState::InGame;
             self.settings = Some(settings);
             self.recv_window_start = 0;
@@ -352,12 +360,12 @@ impl NetClient {
     }
 
     fn parse_game_data(&mut self, packet: &mut NetPacket) {
-        println!("Client: Processing game data packet");
+        debug!("Processing game data packet");
 
         if let (Some(seq), Some(num_tics)) = (packet.read_u8(), packet.read_u8()) {
             let seq = self.expand_tic_num(seq as u32);
-            println!(
-                "Client: Game data received, seq={}, num_tics={}",
+            debug!(
+                "Game data received, seq={}, num_tics={}",
                 seq, num_tics
             );
 
@@ -369,7 +377,7 @@ impl NetClient {
                     if index < BACKUPTICS {
                         self.recv_window[index].active = true;
                         self.recv_window[index].cmd = cmd;
-                        println!("Client: Stored tic {} in receive window", seq + i as u32);
+                        debug!("Stored tic {} in receive window", seq + i as u32);
                         if i == num_tics - 1 {
                             self.update_clock_sync(seq + i as u32, cmd.latency);
                         }
@@ -398,16 +406,16 @@ impl NetClient {
     }
 
     fn parse_resend_request(&mut self, packet: &mut NetPacket) {
-        println!("Client: Processing resend request");
+        debug!("Processing resend request");
         if self.drone {
-            println!("Client: Error: Resend request but we are a drone");
+            warn!("Error: Resend request but we are a drone");
             return;
         }
 
         if let (Some(start), Some(num_tics)) = (packet.read_i32(), packet.read_u8()) {
             let end = start + num_tics as i32 - 1;
-            println!(
-                "Client: Resend request: start={}, num_tics={}",
+            debug!(
+                "Resend request: start={}, num_tics={}",
                 start, num_tics
             );
 
@@ -429,17 +437,17 @@ impl NetClient {
             }
 
             if resend_start <= resend_end {
-                println!("Client: Resending tics {}-{}", resend_start, resend_end);
+                debug!("Resending tics {}-{}", resend_start, resend_end);
                 self.send_tics(resend_start, resend_end);
             } else {
-                println!("Client: Don't have the tics to resend");
+                warn!("Don't have the tics to resend");
             }
         }
     }
 
     fn parse_console_message(&self, packet: &mut NetPacket) {
         if let Some(msg) = packet.read_string() {
-            println!("Message from server:\n{}", msg);
+            info!("Message from server:\n{}", msg);
         }
     }
 
@@ -480,8 +488,8 @@ impl NetClient {
         last_error = error;
         self.last_latency = latency;
 
-        println!(
-            "Client: Latency {}, remote {}, offset={}ms, cumul_error={}",
+        debug!(
+            "Latency {}, remote {}, offset={}ms, cumul_error={}",
             latency, remote_latency, offset_ms, cumul_error
         );
     }
@@ -502,6 +510,7 @@ impl NetClient {
                 self.recv_window[index].resend_time = now;
             }
         }
+        debug!("Sent resend request for tics {}-{}", start, end);
     }
 
     fn send_game_data_ack(&mut self) {
@@ -512,7 +521,7 @@ impl NetClient {
         self.connection
             .send_packet(&packet, self.server_addr.as_ref().unwrap());
         self.need_acknowledge = false;
-        println!("Client: Game data acknowledgment sent");
+        debug!("Game data acknowledgment sent");
     }
 
     fn send_tics(&mut self, start: u32, end: u32) {
@@ -539,7 +548,7 @@ impl NetClient {
         self.connection
             .send_packet(&packet, self.server_addr.as_ref().unwrap());
         self.need_acknowledge = false;
-        println!("Client: Sent tics from {} to {}", start, end);
+        debug!("Sent tics from {} to {}", start, end);
     }
 
     pub fn send_ticcmd(&mut self, ticcmd: &TicCmd, maketic: u32) {
@@ -693,8 +702,8 @@ impl NetClient {
     ) {
         // This function should update the game state with the new ticcmds
         // It's a placeholder for the actual game logic update
-        println!(
-            "Client: Received tic data for {} players",
+        debug!(
+            "Received tic data for {} players",
             playeringame.iter().filter(|&&p| p).count()
         );
     }
@@ -782,7 +791,7 @@ impl NetClient {
             return;
         }
 
-        println!("Client: Beginning disconnect");
+        info!("Beginning disconnect");
         self.state = ClientState::Disconnecting;
         self.start_time = Instant::now();
 
@@ -794,7 +803,7 @@ impl NetClient {
             self.run();
 
             if self.start_time.elapsed() > Duration::from_secs(5) {
-                println!("Client: No acknowledgment of disconnect received");
+                warn!("No acknowledgment of disconnect received");
                 self.state = ClientState::Disconnected;
                 break;
             }
@@ -803,7 +812,7 @@ impl NetClient {
             std::thread::sleep(Duration::from_millis(1));
         }
 
-        println!("Client: Disconnect complete");
+        info!("Disconnect complete");
         self.shutdown();
     }
 
@@ -854,12 +863,12 @@ impl NetClient {
                 self.send_syn(&connect_data);
                 self.last_send_time = now;
                 self.num_retries += 1;
-                println!("Client: Sent SYN packet. Retry count: {}", self.num_retries);
+                debug!("Sent SYN packet. Retry count: {}", self.num_retries);
             }
 
             if now.duration_since(self.start_time) > Duration::from_secs(30) {
                 self.reject_reason = Some("No response from server".to_string());
-                println!("Client: Connection timed out after 30 seconds");
+                warn!("Connection timed out after 30 seconds");
                 break;
             }
 
@@ -867,7 +876,7 @@ impl NetClient {
 
             // Check for incoming packets
             if let Some((_, packet)) = self.context.recv_packet() {
-                println!("Client: Received packet: {:?}", packet);
+                debug!("Received packet: {:?}", packet);
                 self.parse_packet(&mut packet.clone());
             }
 
@@ -876,13 +885,13 @@ impl NetClient {
         }
 
         if self.state == ClientState::Connected {
-            println!("Client: Successfully connected");
+            info!("Successfully connected");
             self.reject_reason = None;
             self.state = ClientState::WaitingLaunch;
             self.drone = connect_data.drone != 0;
             true
         } else {
-            println!("Client: Connection failed. Reason: {:?}", self.reject_reason);
+            warn!("Connection failed. Reason: {:?}", self.reject_reason);
             self.shutdown();
             false
         }
@@ -914,7 +923,7 @@ impl NetClient {
 
         self.connection
             .send_packet(&packet, self.server_addr.as_ref().unwrap());
-        println!("Client: SYN sent");
+        debug!("SYN sent");
     }
 
     // This function is already defined earlier in the file, so we'll remove this duplicate.
