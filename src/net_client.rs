@@ -203,8 +203,8 @@ impl NetClient {
                 let mut packet = NetPacket::new();
                 packet.write_u16(NET_PACKET_TYPE_GAMEDATA_ACK);
                 packet.write_u8((self.recv_window_start & 0xff) as u8);
-                if let Some(socket) = &self.socket {
-                    if let Err(e) = socket.send(&packet.data) {
+                if let Some(server_addr) = &self.server_addr {
+                    if let Err(e) = self.socket.send_to(&packet.data, server_addr.socket_addr) {
                         warn!("Failed to send keepalive: {}", e);
                     } else {
                         self.last_send_time = now;
