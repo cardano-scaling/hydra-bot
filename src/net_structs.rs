@@ -304,7 +304,7 @@ impl NetConnection {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct NetServerRecv {
     pub active: bool,
     pub resend_time: Instant,
@@ -321,7 +321,7 @@ impl Default for NetServerRecv {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct NetServerSend {
     pub active: bool,
     pub seq: u32,

@@ -103,6 +103,10 @@ impl NetClient {
         }
     }
 
+    pub fn get_reject_reason(&self) -> Option<&str> {
+        self.reject_reason.as_deref()
+    }
+
     pub fn init(&mut self) {
         debug!("Initializing NetClient");
         self.init_bot();

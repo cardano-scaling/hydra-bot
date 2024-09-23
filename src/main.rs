@@ -44,6 +44,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             error!("Failed to connect to server: {}", e);
+            // Try to get more information about the connection failure
+            if let Some(reject_reason) = client.get_reject_reason() {
+                error!("Server rejection reason: {}", reject_reason);
+            }
             return Err(e.into());
         }
     }
@@ -63,5 +67,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Add some delay to prevent busy-waiting
         sleep(Duration::from_millis(10)).await;
         debug!("Completed a game loop iteration");
+
+        // Check if the client is still connected
+        if !client.is_connected() {
+            error!("Lost connection to server");
+            break;
+        }
     }
+
+    info!("Game loop ended");
+    Ok(())
 }
