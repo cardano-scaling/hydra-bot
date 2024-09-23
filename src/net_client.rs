@@ -839,6 +839,7 @@ impl NetClient {
     }
 
     pub async fn connect(&mut self, addr: NetAddr, connect_data: ConnectData) -> Result<(), String> {
+        debug!("Attempting to connect to server at {:?}", addr);
         self.server_addr = Some(addr.clone());
         self.connection.init_client(&addr, &connect_data);
 
@@ -849,40 +850,46 @@ impl NetClient {
         self.net_local_deh_sha1sum.copy_from_slice(&connect_data.deh_sha1sum);
         self.net_local_is_freedoom = connect_data.is_freedoom != 0;
 
-        self.net_client_connected = true;
+        self.net_client_connected = false;  // Set to false until we're actually connected
         self.net_client_received_wait_data = false;
 
         self.start_time = Instant::now();
         self.last_send_time = Instant::now() - Duration::from_secs(1);
         self.num_retries = 0;
 
+        let timeout = Duration::from_secs(30);
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+
         while self.state == ClientState::Connecting {
-            let now = Instant::now();
+            tokio::select! {
+                _ = interval.tick() => {
+                    if self.start_time.elapsed() > timeout {
+                        let error_msg = "Connection timed out after 30 seconds".to_string();
+                        self.reject_reason = Some(error_msg.clone());
+                        warn!("{}", error_msg);
+                        return Err(error_msg);
+                    }
 
-            if now.duration_since(self.last_send_time) > Duration::from_secs(1) {
-                self.send_syn(&connect_data);
-                self.last_send_time = now;
-                self.num_retries += 1;
-                debug!("Sent SYN packet. Retry count: {}", self.num_retries);
+                    match self.send_syn(&connect_data) {
+                        Ok(_) => {
+                            self.num_retries += 1;
+                            debug!("Sent SYN packet. Retry count: {}", self.num_retries);
+                        },
+                        Err(e) => {
+                            warn!("Failed to send SYN packet: {}", e);
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                    self.run();
+
+                    // Check for incoming packets
+                    if let Some((_, packet)) = self.context.recv_packet() {
+                        debug!("Received packet: {:?}", packet);
+                        self.parse_packet(&mut packet.clone());
+                    }
+                }
             }
-
-            if now.duration_since(self.start_time) > Duration::from_secs(30) {
-                let error_msg = "Connection timed out after 30 seconds".to_string();
-                self.reject_reason = Some(error_msg.clone());
-                warn!("{}", error_msg);
-                return Err(error_msg);
-            }
-
-            self.run();
-
-            // Check for incoming packets
-            if let Some((_, packet)) = self.context.recv_packet() {
-                debug!("Received packet: {:?}", packet);
-                self.parse_packet(&mut packet.clone());
-            }
-
-            // Don't hog the CPU
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
         if self.state == ClientState::Connected {
@@ -890,6 +897,7 @@ impl NetClient {
             self.reject_reason = None;
             self.state = ClientState::WaitingLaunch;
             self.drone = connect_data.drone != 0;
+            self.net_client_connected = true;
             Ok(())
         } else {
             let error_msg = format!("Connection failed. Reason: {:?}", self.reject_reason);
@@ -914,7 +922,7 @@ impl NetClient {
         }
     }
 
-    fn send_syn(&self, data: &ConnectData) {
+    fn send_syn(&self, data: &ConnectData) -> Result<(), String> {
         let mut packet = NetPacket::new();
         packet.write_u16(NET_PACKET_TYPE_SYN);
         packet.write_u32(NET_MAGIC_NUMBER);
@@ -923,9 +931,13 @@ impl NetClient {
         packet.write_connect_data(data);
         packet.write_string(&self.player_name);
 
-        self.connection
-            .send_packet(&packet, self.server_addr.as_ref().unwrap());
-        debug!("SYN sent");
+        if let Some(server_addr) = self.server_addr.as_ref() {
+            self.connection.send_packet(&packet, server_addr);
+            debug!("SYN sent to {:?}", server_addr);
+            Ok(())
+        } else {
+            Err("Server address not set".to_string())
+        }
     }
 
     // This function is already defined earlier in the file, so we'll remove this duplicate.
