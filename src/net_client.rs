@@ -52,6 +52,18 @@ pub struct NetClient {
 }
 
 impl NetClient {
+    // ... existing methods ...
+
+    pub fn is_drone(&self) -> bool {
+        self.drone
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.net_client_connected
+    }
+}
+
+impl NetClient {
     pub fn new(player_name: String, drone: bool) -> Self {
         NetClient {
             connection: NetConnection::default(),

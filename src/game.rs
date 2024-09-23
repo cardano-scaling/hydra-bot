@@ -80,12 +80,12 @@ impl Game {
     fn build_new_tic(&mut self, client: &mut NetClient) -> bool {
         let gameticdiv = self.maketic / self.ticdup;
 
-        if client.drone {
+        if client.is_drone() {
             return false;
         }
 
         if self.new_sync {
-            if !client.net_client_connected && self.maketic - gameticdiv > 2 {
+            if !client.is_connected() && self.maketic - gameticdiv > 2 {
                 return false;
             }
 
@@ -100,7 +100,7 @@ impl Game {
         // TODO: Implement build_ticcmd
         // client.build_ticcmd(&mut cmd, self.maketic);
 
-        if client.net_client_connected {
+        if client.is_connected() {
             client.send_ticcmd(&cmd, self.maketic as u32);
         }
 
@@ -183,7 +183,7 @@ impl Game {
                 counts = 1;
             }
 
-            if client.net_client_connected {
+            if client.is_connected() {
                 self.old_net_sync();
             }
         }
@@ -217,7 +217,7 @@ impl Game {
 
             let set = &mut self.ticdata[(self.gametic / self.ticdup) as usize % BACKUPTICS];
 
-            if !client.net_client_connected {
+            if !client.is_connected() {
                 self.single_player_clear(set);
             }
 
@@ -271,10 +271,10 @@ impl Game {
     }
 
     fn players_in_game(&self, client: &NetClient) -> bool {
-        if client.net_client_connected {
+        if client.is_connected() {
             self.local_playeringame.iter().any(|&x| x)
         } else {
-            !client.drone
+            !client.is_drone()
         }
     }
 
