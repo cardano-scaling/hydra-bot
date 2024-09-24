@@ -1,13 +1,11 @@
+use crate::net_client::NetClient;
+use crate::net_structs::{GameSettings, TicCmd, BACKUPTICS, NET_MAXPLAYERS};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
-use crate::net_structs::{TicCmd, GameSettings, NET_MAXPLAYERS, BACKUPTICS};
-use crate::net_client::NetClient;
 
-// Constants
 pub const TICRATE: u32 = 35;
 const MAX_NETGAME_STALL_TICS: u32 = 2;
 
-// Structs
 #[derive(Clone, Copy)]
 struct TiccmdSet {
     cmds: [TicCmd; NET_MAXPLAYERS],
@@ -144,11 +142,11 @@ impl Game {
         }
     }
 
-    pub fn d_start_game_loop(&mut self) {
+    pub fn start_loop(&mut self) {
         self.lasttime = (self.get_adjusted_time() / self.ticdup as u32) as i32;
     }
 
-    pub fn try_run_tics(&mut self, client: &mut NetClient) {
+    pub fn tick(&mut self, client: &mut NetClient) {
         let enter_tic = (self.get_adjusted_time() / self.ticdup as u32) as i32;
         let mut realtics;
         let mut availabletics;
@@ -202,7 +200,9 @@ impl Game {
             }
 
             if lowtic < self.gametic / self.ticdup + counts {
-                if self.get_adjusted_time() / self.ticdup as u32 - enter_tic as u32 >= MAX_NETGAME_STALL_TICS {
+                if self.get_adjusted_time() / self.ticdup as u32 - enter_tic as u32
+                    >= MAX_NETGAME_STALL_TICS
+                {
                     warn!("Network stall detected");
                     return;
                 }
@@ -290,7 +290,8 @@ impl Game {
     fn ticdup_squash(set: &mut TiccmdSet) {
         for cmd in &mut set.cmds {
             cmd.chatchar = 0;
-            if cmd.buttons & 0x80 != 0 { // 0x80 is the value for BT_SPECIAL
+            if cmd.buttons & 0x80 != 0 {
+                // 0x80 is the value for BT_SPECIAL
                 cmd.buttons = 0;
             }
         }
