@@ -1,12 +1,14 @@
 #![allow(unused)]
 
-use argh::FromArgs;
-use sha1::{Digest, Sha1};
 use std::fs::File;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::thread;
 use std::time::Duration;
+
+use argh::FromArgs;
+use sha1::{Digest, Sha1};
 use tracing::{debug, error, info, warn};
 
 mod game;
@@ -19,21 +21,21 @@ use self::net_client::NetClient;
 use self::net_structs::{ConnectData, NetAddr};
 
 #[derive(FromArgs)]
-/// Doom client application
-struct ClientArgs {
-    /// server address to connect to
-    #[argh(positional)]
-    server_addr: String,
+/// An AI player implementation compatible with Chocolate Doom v3.
+struct Args {
+    /// which server to connect to
+    #[argh(option, short = 'a')]
+    address: String,
 
-    /// path to the WAD file to load
-    #[argh(positional)]
-    wad_path: PathBuf,
+    /// the WAD path to load
+    #[argh(option, short = 'i')]
+    iwad: PathBuf,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let args: ClientArgs = argh::from_env();
+    let args: Args = argh::from_env();
 
     info!("Initializing client");
     let mut client = match NetClient::new("Player1".to_string(), false) {
@@ -49,10 +51,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut game = Game::new();
 
     info!("Connecting to server");
-    let server_addr = args.server_addr.parse::<SocketAddr>()?;
+    let server_addr = args.address.parse::<SocketAddr>()?;
 
     // Read WAD file and compute SHA1
-    let mut wad_file = File::open(&args.wad_path)?;
+    let mut wad_file = File::open(&args.iwad)?;
     let mut wad_contents = Vec::new();
     wad_file.read_to_end(&mut wad_contents)?;
     let wad_sha1 = Sha1::digest(&wad_contents);
@@ -75,10 +77,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             error!("Failed to connect to server: {}", e);
+
             // Try to get more information about the connection failure
             if let Some(reject_reason) = client.get_reject_reason() {
                 error!("Server rejection reason: {}", reject_reason);
             }
+
             return Err(e.into());
         }
     }
@@ -99,16 +103,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         client.run();
 
         // Add some delay to prevent busy-waiting
-        std::thread::sleep(Duration::from_millis(10));
-        debug!("Completed a game loop iteration");
+        thread::sleep(Duration::from_millis(10));
+        debug!("TICK!");
 
         // Check if the client is still connected
         if !client.is_connected() {
             error!("Lost connection to server");
+
             break;
         }
     }
 
     info!("Game loop ended");
+
     Ok(())
 }
