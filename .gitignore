@@ -1,4 +1,4 @@
-.aider*
 target
 *.WAD
 *.wad
+*.pcap

@@ -1,7 +1,8 @@
 [package]
-name = "doom_bot_client"
-version = "0.1.0"
+name = "hydra-bot"
+version = "0.0.1"
 edition = "2021"
+authors = ["Cainã Costa <me@cfcosta.com>"]
 
 [dependencies]
 argh = "0.1.10"
