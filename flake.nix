@@ -5,14 +5,6 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
-
-    cardano-node.url = "github:intersectmbo/cardano-node/9.0.0";
-    hydra.url = "github:cardano-scaling/hydra/0.17.0";
-
-    gitignore = {
-      url = "github:hercules-ci/gitignore.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
@@ -43,46 +35,14 @@
         packages.default = platform.buildRustPackage {
           name = "hydra-bot";
           src = ./.;
-
-          buildInputs = with pkgs; [
-            pkg-config
-            openssl
-          ];
-
           cargoLock.lockFile = ./Cargo.lock;
         };
 
         devShells.default = mkShell {
           buildInputs = with pkgs; [
             rust
-
             chocolate-doom
-            openssl
-            pkg-config
-            python312Packages.virtualenvwrapper
           ];
-
-          shellHook =
-            let
-              lib-path = pkgs.lib.makeLibraryPath [
-                pkgs.libffi
-                pkgs.openssl
-                pkgs.stdenv.cc.cc
-              ];
-            in
-            ''
-              # Augment the dynamic linker path
-              export "LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib-path}"
-              SOURCE_DATE_EPOCH=$(date +%s)
-
-              if test ! -d .venv; then
-                virtualenv .venv
-              fi
-
-              source ./.venv/bin/activate
-              export PYTHONPATH=`pwd`/.venv/${pkgs.python312.sitePackages}/:$PYTHONPATH
-              [ -e .venv/bin/aider ] || pip install aider
-            '';
         };
       }
     );

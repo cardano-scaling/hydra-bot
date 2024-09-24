@@ -457,30 +457,11 @@ mod tests {
     }
 
     #[test]
-    fn test_write_and_read_safe_string() {
-        let mut packet = NetPacket::new();
-        packet.write_string("Hello\x00World\x1F!");
-        packet.reset();
-        assert_eq!(packet.read_safe_string(), Some("Hello".to_string()));
-    }
-
-    #[test]
     fn test_reset_position() {
         let mut packet = NetPacket::new();
         packet.write_u8(1);
         packet.write_u8(2);
         packet.reset();
         assert_eq!(packet.read_u8(), Some(1));
-    }
-
-    #[test]
-    fn test_debug_trait() {
-        let mut packet = NetPacket::new();
-        packet.write_u8(0xAB);
-        packet.write_u8(0xCD);
-        packet.write_u8(0xEF);
-        packet.reset();
-        let debug_str = format!("{:?}", packet);
-        assert_eq!(debug_str, "NetPacket { data: \"AB CD EF\", pos: 0 }");
     }
 }

@@ -1,7 +1,7 @@
 #![allow(unused)]
 
 use argh::FromArgs;
-use sha1::{Sha1, Digest};
+use sha1::{Digest, Sha1};
 use std::fs::File;
 use std::io::Read;
 use std::net::SocketAddr;
@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Connecting to server");
     let server_addr = args.server_addr.parse::<SocketAddr>()?;
-    
+
     // Read WAD file and compute SHA1
     let mut wad_file = File::open(&args.wad_path)?;
     let mut wad_contents = Vec::new();

@@ -93,19 +93,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "doom_bot_client"
-version = "0.1.0"
-dependencies = [
- "argh",
- "bincode",
- "rand",
- "serde",
- "sha1",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -124,6 +111,19 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi",
+]
+
+[[package]]
+name = "hydra-bot"
+version = "0.0.1"
+dependencies = [
+ "argh",
+ "bincode",
+ "rand",
+ "serde",
+ "sha1",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

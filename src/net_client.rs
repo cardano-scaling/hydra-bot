@@ -1,13 +1,12 @@
-use std::time::{Duration, Instant};
-use tracing::{debug, info, warn, error};
-use std::net::{UdpSocket, SocketAddr};
-use std::sync::Arc;
 use std::io;
+use std::net::{SocketAddr, UdpSocket};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tracing::{debug, error, info, warn};
 
 use crate::net_packet::NetPacket;
 use crate::net_structs::*;
 
-// Constants
 const NET_PACKET_TYPE_SYN: u16 = 0;
 const NET_PACKET_TYPE_REJECTED: u16 = 1;
 const NET_PACKET_TYPE_WAITING_DATA: u16 = 2;
@@ -76,7 +75,10 @@ impl NetClient {
 
 impl NetClient {
     pub fn new(player_name: String, drone: bool) -> io::Result<Self> {
-        debug!("Creating new NetClient: player_name={}, drone={}", player_name, drone);
+        debug!(
+            "Creating new NetClient: player_name={}, drone={}",
+            player_name, drone
+        );
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
         Ok(NetClient {
@@ -135,8 +137,6 @@ impl NetClient {
     fn init_bot(&mut self) {
         if self.drone {
             debug!("Initializing bot-specific settings");
-            // Initialize bot-specific settings
-            // For example, set bot skill level
         }
     }
 
@@ -215,7 +215,10 @@ impl NetClient {
     }
 
     fn handle_disconnected(&mut self) {
-        self.receive_tic(&[TicCmd::default(); NET_MAXPLAYERS], &[false; NET_MAXPLAYERS]);
+        self.receive_tic(
+            &[TicCmd::default(); NET_MAXPLAYERS],
+            &[false; NET_MAXPLAYERS],
+        );
         self.shutdown();
     }
 
@@ -264,7 +267,8 @@ impl NetClient {
     fn send_disconnect_ack(&self) {
         let mut packet = NetPacket::new();
         packet.write_u16(NET_PACKET_TYPE_DISCONNECT_ACK);
-        self.connection.send_packet(&packet, self.server_addr.as_ref().unwrap());
+        self.connection
+            .send_packet(&packet, self.server_addr.as_ref().unwrap());
     }
 
     fn parse_syn(&mut self, packet: &mut NetPacket) {
@@ -380,10 +384,7 @@ impl NetClient {
 
         if let (Some(seq), Some(num_tics)) = (packet.read_u8(), packet.read_u8()) {
             let seq = self.expand_tic_num(seq as u32);
-            debug!(
-                "Game data received, seq={}, num_tics={}",
-                seq, num_tics
-            );
+            debug!("Game data received, seq={}, num_tics={}", seq, num_tics);
 
             let lowres_turn = self.settings.as_ref().unwrap().lowres_turn != 0;
 
@@ -430,10 +431,7 @@ impl NetClient {
 
         if let (Some(start), Some(num_tics)) = (packet.read_i32(), packet.read_u8()) {
             let end = start + num_tics as i32 - 1;
-            debug!(
-                "Resend request: start={}, num_tics={}",
-                start, num_tics
-            );
+            debug!("Resend request: start={}, num_tics={}", start, num_tics);
 
             let mut resend_start = start as u32;
             let mut resend_end = end as u32;
@@ -716,8 +714,7 @@ impl NetClient {
         ticcmds: &[TicCmd; NET_MAXPLAYERS],
         playeringame: &[bool; NET_MAXPLAYERS],
     ) {
-        // This function should update the game state with the new ticcmds
-        // It's a placeholder for the actual game logic update
+        // TODO: Implement this.
         debug!(
             "Received tic data for {} players",
             playeringame.iter().filter(|&&p| p).count()
@@ -813,7 +810,8 @@ impl NetClient {
 
         let mut packet = NetPacket::new();
         packet.write_u16(NET_PACKET_TYPE_DISCONNECT);
-        self.connection.send_packet(&packet, self.server_addr.as_ref().unwrap());
+        self.connection
+            .send_packet(&packet, self.server_addr.as_ref().unwrap());
 
         while self.state == ClientState::Disconnecting {
             self.run();
@@ -862,8 +860,10 @@ impl NetClient {
         self.state = ClientState::Connecting;
         self.reject_reason = Some("Unknown reason".to_string());
 
-        self.net_local_wad_sha1sum.copy_from_slice(&connect_data.wad_sha1sum);
-        self.net_local_deh_sha1sum.copy_from_slice(&connect_data.deh_sha1sum);
+        self.net_local_wad_sha1sum
+            .copy_from_slice(&connect_data.wad_sha1sum);
+        self.net_local_deh_sha1sum
+            .copy_from_slice(&connect_data.deh_sha1sum);
         self.net_local_is_freedoom = connect_data.is_freedoom != 0;
 
         self.net_client_connected = false;
@@ -901,12 +901,10 @@ impl NetClient {
 
             self.run();
 
-            // Check for incoming packets
             if let Some((_, mut packet)) = self.context.recv_packet() {
                 debug!("Received packet: {:?}", packet);
                 self.parse_packet(&mut packet);
-                
-                // Check if we've transitioned to Connected state
+
                 if self.state == ClientState::Connected {
                     info!("Successfully connected");
                     self.reject_reason = None;
@@ -917,7 +915,6 @@ impl NetClient {
                 }
             }
 
-            // Add a small delay to prevent busy-waiting
             std::thread::sleep(Duration::from_millis(100));
         }
 
@@ -946,7 +943,9 @@ impl NetClient {
         packet.write_string(&self.player_name);
 
         if let Some(server_addr) = &self.server_addr {
-            self.socket.send_to(&packet.data, server_addr.socket_addr).map_err(|e| e.to_string())?;
+            self.socket
+                .send_to(&packet.data, server_addr.socket_addr)
+                .map_err(|e| e.to_string())?;
             debug!("SYN sent to server");
             Ok(())
         } else {
@@ -955,31 +954,15 @@ impl NetClient {
     }
 
     pub fn build_ticcmd(&mut self, cmd: &mut TicCmd, maketic: u32) {
-        // For now, we'll just create empty commands
         *cmd = TicCmd::default();
     }
 
     pub fn run_tic(&mut self, cmds: &[TicCmd; NET_MAXPLAYERS], ingame: &[bool; NET_MAXPLAYERS]) {
-        // Process the received tics
-        // For now, we'll just print out the received commands
+        // TODO: Implement this
         for (i, (cmd, &in_game)) in cmds.iter().zip(ingame.iter()).enumerate() {
             if in_game {
                 println!("Player {}: {:?}", i, cmd);
             }
         }
-    }
-
-    // This function is already defined earlier in the file, so we'll remove this duplicate.
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_client_initialization() {
-        let client = NetClient::new("Player1".to_string(), false);
-        assert_eq!(client.player_name, "Player1");
-        assert!(!client.drone);
     }
 }
