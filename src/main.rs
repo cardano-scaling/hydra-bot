@@ -74,28 +74,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if !client.is_connected() {
-        error!("Connection process completed, but client is not connected");
-        return Err("Failed to establish connection".into());
+    info!("Waiting for game to start...");
+    loop {
+        client.run();
+        if let Some(settings) = client.get_settings() {
+            info!("Game started with settings: {:?}", settings);
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
     }
 
-    info!("Client and game initialized, starting main loop");
-
+    info!("Game started, entering main game loop");
     game.start_loop();
 
     loop {
         game.tick(&mut client);
         client.run();
-        thread::sleep(Duration::from_millis(10));
-        debug!("Tick");
 
         if !client.is_connected() {
-            error!("Lost connection to server");
+            info!("Disconnected from server");
             break;
         }
+
+        thread::sleep(Duration::from_millis(1000 / 35)); // Aim for ~35 FPS
     }
 
     info!("Game loop ended");
+    client.disconnect();
 
     Ok(())
 }
