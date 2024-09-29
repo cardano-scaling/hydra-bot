@@ -54,23 +54,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         gamemission: GameMission::Doom2 as i32,
         lowres_turn: 0,
         drone: 1, // Set to 1 for bot
-        max_players: 4,
+        max_players: 8, // Increased from 4 to 8
         is_freedoom: 0,
         wad_sha1sum: wad_sha1.into(),
         deh_sha1sum: [0; 20],
         player_class: 0,
     };
 
-    match client.connect(server_addr, connect_data) {
-        Ok(_) => {
-            info!("Connected to server successfully");
-        }
-        Err(e) => {
-            error!("Failed to connect to server: {}", e);
-            if let Some(reject_reason) = client.get_reject_reason() {
-                error!("Server rejection reason: {}", reject_reason);
+    info!("Connecting with data: {:?}", connect_data);
+
+    let mut retry_count = 0;
+    const MAX_RETRIES: u32 = 3;
+
+    while retry_count < MAX_RETRIES {
+        match client.connect(server_addr, connect_data) {
+            Ok(_) => {
+                info!("Connected to server successfully");
+                break;
             }
-            return Err(e.into());
+            Err(e) => {
+                error!("Failed to connect to server: {}", e);
+                if let Some(reject_reason) = client.get_reject_reason() {
+                    error!("Server rejection reason: {}", reject_reason);
+                }
+                retry_count += 1;
+                if retry_count < MAX_RETRIES {
+                    info!("Retrying connection ({}/{})", retry_count, MAX_RETRIES);
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                } else {
+                    return Err(e.into());
+                }
+            }
         }
     }
 

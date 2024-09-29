@@ -971,7 +971,8 @@ impl Client {
         packet.write_string(&self.player_name);
 
         self.send_packet(&packet);
-        debug!("SYN sent to server: {} bytes", packet.data.len());
+        info!("SYN sent to server: {} bytes", packet.data.len());
+        debug!("SYN packet contents: {:?}", packet);
     }
 
     pub fn build_ticcmd(&mut self, cmd: &mut TicCmd, _maketic: u32) {
