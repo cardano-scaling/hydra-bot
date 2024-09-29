@@ -1,17 +1,17 @@
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
-use crate::net_structs::*;
+use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetPacket {
+pub struct Packet {
     pub data: Vec<u8>,
     pub pos: usize,
 }
 
-impl NetPacket {
+impl Packet {
     pub fn new() -> Self {
-        NetPacket {
+        Packet {
             data: Vec::new(),
             pos: 0,
         }
@@ -21,8 +21,8 @@ impl NetPacket {
         self.data.extend_from_slice(data);
     }
 
-    fn read_ticcmd_diff(&mut self, lowres_turn: bool) -> Option<NetTicDiff> {
-        let mut diff = NetTicDiff {
+    fn read_ticcmd_diff(&mut self, lowres_turn: bool) -> Option<TicDiff> {
+        let mut diff = TicDiff {
             diff: self.read_u8()? as u32,
             ..Default::default()
         };
@@ -183,14 +183,14 @@ impl NetPacket {
         self.pos = 0;
     }
 
-    pub fn read_protocol(&mut self) -> NetProtocol {
+    pub fn read_protocol(&mut self) -> Protocol {
         if let Some(name) = self.read_string() {
             match name.as_str() {
-                "CHOCOLATE_DOOM_0" => NetProtocol::ChocolateDoom0,
-                _ => NetProtocol::Unknown,
+                "CHOCOLATE_DOOM_0" => Protocol::ChocolateDoom0,
+                _ => Protocol::Unknown,
             }
         } else {
-            NetProtocol::Unknown
+            Protocol::Unknown
         }
     }
 
@@ -199,9 +199,9 @@ impl NetPacket {
         self.write_string("CHOCOLATE_DOOM_0");
     }
 
-    pub fn write_protocol(&mut self, protocol: NetProtocol) {
+    pub fn write_protocol(&mut self, protocol: Protocol) {
         let name = match protocol {
-            NetProtocol::ChocolateDoom0 => "CHOCOLATE_DOOM_0",
+            Protocol::ChocolateDoom0 => "CHOCOLATE_DOOM_0",
             _ => panic!("NET_WriteProtocol: Unknown protocol {:?}", protocol),
         };
         self.write_string(name);
@@ -219,8 +219,8 @@ impl NetPacket {
         self.write_u8(data.player_class as u8);
     }
 
-    pub fn read_wait_data(&mut self) -> Option<NetWaitData> {
-        let mut data = NetWaitData {
+    pub fn read_wait_data(&mut self) -> Option<WaitData> {
+        let mut data = WaitData {
             num_players: self.read_u8()? as i32,
             num_drones: self.read_u8()? as i32,
             ready_players: self.read_u8()? as i32,
@@ -303,8 +303,8 @@ impl NetPacket {
         }
     }
 
-    pub fn read_full_ticcmd(&mut self, lowres_turn: bool) -> Option<NetFullTicCmd> {
-        let mut cmd = NetFullTicCmd {
+    pub fn read_full_ticcmd(&mut self, lowres_turn: bool) -> Option<FullTicCmd> {
+        let mut cmd = FullTicCmd {
             latency: self.read_i16()? as i32,
             ..Default::default()
         };
@@ -322,7 +322,7 @@ impl NetPacket {
         Some(cmd)
     }
 
-    pub fn write_ticcmd_diff(&mut self, diff: &NetTicDiff, lowres_turn: bool) {
+    pub fn write_ticcmd_diff(&mut self, diff: &TicDiff, lowres_turn: bool) {
         self.write_u8(diff.diff as u8);
 
         if diff.diff & NET_TICDIFF_FORWARD != 0 {

@@ -1,5 +1,6 @@
-use crate::net_client::NetClient;
-use crate::net_structs::{TicCmd, BACKUPTICS, NET_MAXPLAYERS};
+use crate::net::client::Client;
+use crate::net::{TicCmd, BACKUPTICS, NET_MAXPLAYERS};
+
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
@@ -78,7 +79,7 @@ impl Game {
         }
     }
 
-    fn build_new_tic(&mut self, client: &mut NetClient) -> bool {
+    fn build_new_tic(&mut self, client: &mut Client) -> bool {
         let gameticdiv = self.maketic / self.ticdup;
 
         if client.is_drone() {
@@ -113,7 +114,7 @@ impl Game {
         true
     }
 
-    pub fn net_update(&mut self, client: &mut NetClient) {
+    pub fn net_update(&mut self, client: &mut Client) {
         if self.singletics {
             return;
         }
@@ -153,7 +154,7 @@ impl Game {
         self.lasttime = (self.get_adjusted_time() / self.ticdup as u32) as i32;
     }
 
-    pub fn tick(&mut self, client: &mut NetClient) {
+    pub fn tick(&mut self, client: &mut Client) {
         let enter_tic = (self.get_adjusted_time() / self.ticdup as u32) as i32;
 
         let mut counts;
@@ -195,7 +196,7 @@ impl Game {
                 if self.get_adjusted_time() / self.ticdup as u32 - enter_tic as u32
                     >= MAX_NETGAME_STALL_TICS
                 {
-                    warn!("Network stall detected");
+                    warn!("work stall detected");
                     return;
                 }
 
@@ -257,7 +258,7 @@ impl Game {
         }
     }
 
-    fn players_in_game(&self, client: &NetClient) -> bool {
+    fn players_in_game(&self, client: &Client) -> bool {
         if client.is_connected() {
             self.local_playeringame.iter().any(|&x| x)
         } else {

@@ -16,6 +16,9 @@ pub const NET_TICDIFF_CHATCHAR: u32 = 1 << 5;
 pub const NET_TICDIFF_RAVEN: u32 = 1 << 6;
 pub const NET_TICDIFF_STRIFE: u32 = 1 << 7;
 
+pub mod client;
+pub mod packet;
+
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct TicCmd {
     pub forwardmove: i8,
@@ -66,14 +69,14 @@ pub struct GameSettings {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NetProtocol {
+pub enum Protocol {
     #[default]
     ChocolateDoom0,
     Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NetPacketType {
+pub enum PacketType {
     Syn,
     Ack,
     Rejected,
@@ -93,69 +96,69 @@ pub enum NetPacketType {
     NatHolePunch,
 }
 
-impl NetPacketType {
+impl PacketType {
     pub fn from_u16(value: u16) -> Option<Self> {
         match value {
-            0 => Some(NetPacketType::Syn),
-            1 => Some(NetPacketType::Ack),
-            2 => Some(NetPacketType::Rejected),
-            3 => Some(NetPacketType::KeepAlive),
-            4 => Some(NetPacketType::WaitingData),
-            5 => Some(NetPacketType::GameStart),
-            6 => Some(NetPacketType::GameData),
-            7 => Some(NetPacketType::GameDataAck),
-            8 => Some(NetPacketType::Disconnect),
-            9 => Some(NetPacketType::DisconnectAck),
-            10 => Some(NetPacketType::ReliableAck),
-            11 => Some(NetPacketType::GameDataResend),
-            12 => Some(NetPacketType::ConsoleMessage),
-            13 => Some(NetPacketType::Query),
-            14 => Some(NetPacketType::QueryResponse),
-            15 => Some(NetPacketType::Launch),
-            16 => Some(NetPacketType::NatHolePunch),
+            0 => Some(PacketType::Syn),
+            1 => Some(PacketType::Ack),
+            2 => Some(PacketType::Rejected),
+            3 => Some(PacketType::KeepAlive),
+            4 => Some(PacketType::WaitingData),
+            5 => Some(PacketType::GameStart),
+            6 => Some(PacketType::GameData),
+            7 => Some(PacketType::GameDataAck),
+            8 => Some(PacketType::Disconnect),
+            9 => Some(PacketType::DisconnectAck),
+            10 => Some(PacketType::ReliableAck),
+            11 => Some(PacketType::GameDataResend),
+            12 => Some(PacketType::ConsoleMessage),
+            13 => Some(PacketType::Query),
+            14 => Some(PacketType::QueryResponse),
+            15 => Some(PacketType::Launch),
+            16 => Some(PacketType::NatHolePunch),
             _ => None,
         }
     }
 
     pub fn to_u16(self) -> u16 {
         match self {
-            NetPacketType::Syn => 0,
-            NetPacketType::Ack => 1,
-            NetPacketType::Rejected => 2,
-            NetPacketType::KeepAlive => 3,
-            NetPacketType::WaitingData => 4,
-            NetPacketType::GameStart => 5,
-            NetPacketType::GameData => 6,
-            NetPacketType::GameDataAck => 7,
-            NetPacketType::Disconnect => 8,
-            NetPacketType::DisconnectAck => 9,
-            NetPacketType::ReliableAck => 10,
-            NetPacketType::GameDataResend => 11,
-            NetPacketType::ConsoleMessage => 12,
-            NetPacketType::Query => 13,
-            NetPacketType::QueryResponse => 14,
-            NetPacketType::Launch => 15,
-            NetPacketType::NatHolePunch => 16,
+            PacketType::Syn => 0,
+            PacketType::Ack => 1,
+            PacketType::Rejected => 2,
+            PacketType::KeepAlive => 3,
+            PacketType::WaitingData => 4,
+            PacketType::GameStart => 5,
+            PacketType::GameData => 6,
+            PacketType::GameDataAck => 7,
+            PacketType::Disconnect => 8,
+            PacketType::DisconnectAck => 9,
+            PacketType::ReliableAck => 10,
+            PacketType::GameDataResend => 11,
+            PacketType::ConsoleMessage => 12,
+            PacketType::Query => 13,
+            PacketType::QueryResponse => 14,
+            PacketType::Launch => 15,
+            PacketType::NatHolePunch => 16,
         }
     }
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
-pub struct NetTicDiff {
+pub struct TicDiff {
     pub diff: u32,
     pub cmd: TicCmd,
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
-pub struct NetFullTicCmd {
+pub struct FullTicCmd {
     pub latency: i32,
     pub seq: u32,
     pub playeringame: [bool; NET_MAXPLAYERS],
-    pub cmds: [NetTicDiff; NET_MAXPLAYERS],
+    pub cmds: [TicDiff; NET_MAXPLAYERS],
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct NetWaitData {
+pub struct WaitData {
     pub num_players: i32,
     pub num_drones: i32,
     pub ready_players: i32,
@@ -241,13 +244,13 @@ pub enum ClientState {
 }
 
 #[derive(Clone, Copy)]
-pub struct NetServerRecv {
+pub struct ServerRecv {
     pub active: bool,
     pub resend_time: Instant,
-    pub cmd: NetFullTicCmd,
+    pub cmd: FullTicCmd,
 }
 
-impl Default for NetServerRecv {
+impl Default for ServerRecv {
     fn default() -> Self {
         Self {
             active: false,
@@ -258,14 +261,14 @@ impl Default for NetServerRecv {
 }
 
 #[derive(Clone, Copy)]
-pub struct NetServerSend {
+pub struct ServerSend {
     pub active: bool,
     pub seq: u32,
     pub time: Instant,
-    pub cmd: NetTicDiff,
+    pub cmd: TicDiff,
 }
 
-impl Default for NetServerSend {
+impl Default for ServerSend {
     fn default() -> Self {
         Self {
             active: false,
@@ -277,8 +280,8 @@ impl Default for NetServerSend {
 }
 
 #[derive(Debug, Clone)]
-pub struct NetReliablePacket {
-    pub packet: crate::net_packet::NetPacket,
+pub struct ReliablePacket {
+    pub packet: packet::Packet,
     pub seq: u8,
     pub last_send_time: Instant,
 }

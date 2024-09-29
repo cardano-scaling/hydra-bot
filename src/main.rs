@@ -10,13 +10,11 @@ use sha1::{Digest, Sha1};
 use tracing::{debug, error, info};
 
 mod game;
-mod net_client;
-mod net_packet;
-mod net_structs;
+mod net;
 
 use self::game::Game;
-use self::net_client::NetClient;
-use self::net_structs::{ConnectData, GameMode, GameMission};
+use self::net::client::Client;
+use self::net::{ConnectData, GameMission, GameMode};
 
 #[derive(FromArgs)]
 /// An AI player implementation compatible with Chocolate Doom v3.
@@ -36,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Args = argh::from_env();
 
     info!("Initializing client");
-    let mut client = NetClient::new("HydraBot".to_string(), true)?;
+    let mut client = Client::new("HydraBot".to_string(), true)?;
     client.init();
 
     info!("Initializing game");
