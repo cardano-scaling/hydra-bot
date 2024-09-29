@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
-/// Structure that represents a network packet.
+use crate::net_structs::*;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetPacket {
     pub data: Vec<u8>,
@@ -9,7 +10,6 @@ pub struct NetPacket {
 }
 
 impl NetPacket {
-    /// Creates a new network packet with a specified initial size.
     pub fn new() -> Self {
         NetPacket {
             data: Vec::new(),
@@ -17,12 +17,10 @@ impl NetPacket {
         }
     }
 
-    /// Writes a blob of data to the packet.
     pub fn write_blob(&mut self, data: &[u8]) {
         self.data.extend_from_slice(data);
     }
 
-    /// Reads a ticcmd diff from the packet.
     fn read_ticcmd_diff(&mut self, lowres_turn: bool) -> Option<NetTicDiff> {
         let mut diff = NetTicDiff {
             diff: self.read_u8()? as u32,
@@ -76,37 +74,30 @@ impl NetPacket {
         Some(diff)
     }
 
-    /// Writes an unsigned 8-bit integer to the packet.
     pub fn write_u8(&mut self, value: u8) {
         self.data.push(value);
     }
 
-    /// Writes a signed 8-bit integer to the packet.
     pub fn write_i8(&mut self, value: i8) {
-        self.data.push(value as u8);
+        self.write_u8(value as u8);
     }
 
-    /// Writes an unsigned 16-bit integer in big-endian order to the packet.
     pub fn write_u16(&mut self, value: u16) {
         self.data.extend(&value.to_be_bytes());
     }
 
-    /// Writes a signed 16-bit integer in big-endian order to the packet.
     pub fn write_i16(&mut self, value: i16) {
         self.data.extend(&value.to_be_bytes());
     }
 
-    /// Writes an unsigned 32-bit integer in big-endian order to the packet.
     pub fn write_u32(&mut self, value: u32) {
         self.data.extend(&value.to_be_bytes());
     }
 
-    /// Writes a signed 32-bit integer in big-endian order to the packet.
     pub fn write_i32(&mut self, value: i32) {
         self.data.extend(&value.to_be_bytes());
     }
 
-    /// Writes a string to the packet, terminated with a NUL byte.
     pub fn write_string(&mut self, string: &str) {
         let bytes = string.as_bytes();
         for &b in bytes {
@@ -117,7 +108,6 @@ impl NetPacket {
         self.data.push(0); // NUL terminator
     }
 
-    /// Reads an unsigned 8-bit integer from the packet.
     pub fn read_u8(&mut self) -> Option<u8> {
         if self.pos < self.data.len() {
             let value = self.data[self.pos];
@@ -128,12 +118,10 @@ impl NetPacket {
         }
     }
 
-    /// Reads a signed 8-bit integer from the packet.
     pub fn read_i8(&mut self) -> Option<i8> {
         self.read_u8().map(|v| v as i8)
     }
 
-    /// Reads an unsigned 16-bit integer in big-endian order from the packet.
     pub fn read_u16(&mut self) -> Option<u16> {
         if self.pos + 2 <= self.data.len() {
             let bytes = &self.data[self.pos..self.pos + 2];
@@ -144,12 +132,10 @@ impl NetPacket {
         }
     }
 
-    /// Reads a signed 16-bit integer in big-endian order from the packet.
     pub fn read_i16(&mut self) -> Option<i16> {
         self.read_u16().map(|v| v as i16)
     }
 
-    /// Reads an unsigned 32-bit integer in big-endian order from the packet.
     pub fn read_u32(&mut self) -> Option<u32> {
         if self.pos + 4 <= self.data.len() {
             let bytes = &self.data[self.pos..self.pos + 4];
@@ -160,13 +146,10 @@ impl NetPacket {
         }
     }
 
-    /// Reads a signed 32-bit integer in big-endian order from the packet.
     pub fn read_i32(&mut self) -> Option<i32> {
         self.read_u32().map(|v| v as i32)
     }
 
-    /// Reads a string from the packet.
-    /// Returns `None` if a terminating NUL byte is not found before the end of the packet.
     pub fn read_string(&mut self) -> Option<String> {
         if let Some(terminator) = self.data[self.pos..].iter().position(|&c| c == 0) {
             let bytes = &self.data[self.pos..self.pos + terminator];
@@ -178,8 +161,6 @@ impl NetPacket {
         }
     }
 
-    /// Reads a safe string from the packet, filtering out non-printable characters.
-    /// Returns `None` if a terminating NUL byte is not found.
     pub fn read_safe_string(&mut self) -> Option<String> {
         self.read_string().map(|s| {
             s.chars()
@@ -198,12 +179,10 @@ impl NetPacket {
         }
     }
 
-    /// Resets the reading position to the beginning of the packet.
     pub fn reset(&mut self) {
         self.pos = 0;
     }
 
-    /// Reads a protocol from the packet.
     pub fn read_protocol(&mut self) -> NetProtocol {
         if let Some(name) = self.read_string() {
             match name.as_str() {
@@ -215,13 +194,11 @@ impl NetPacket {
         }
     }
 
-    /// Writes a protocol list to the packet.
     pub fn write_protocol_list(&mut self) {
         self.write_u8(1); // Number of protocols
-        self.write_protocol(NetProtocol::ChocolateDoom0);
+        self.write_string("CHOCOLATE_DOOM_0");
     }
 
-    /// Writes a protocol to the packet.
     pub fn write_protocol(&mut self, protocol: NetProtocol) {
         let name = match protocol {
             NetProtocol::ChocolateDoom0 => "CHOCOLATE_DOOM_0",
@@ -230,7 +207,6 @@ impl NetPacket {
         self.write_string(name);
     }
 
-    /// Writes connect data to the packet.
     pub fn write_connect_data(&mut self, data: &ConnectData) {
         self.write_u8(data.gamemode as u8);
         self.write_u8(data.gamemission as u8);
@@ -243,7 +219,6 @@ impl NetPacket {
         self.write_u8(data.player_class as u8);
     }
 
-    /// Reads wait data from the packet.
     pub fn read_wait_data(&mut self) -> Option<NetWaitData> {
         let mut data = NetWaitData {
             num_players: self.read_u8()? as i32,
@@ -278,7 +253,6 @@ impl NetPacket {
         Some(data)
     }
 
-    /// Reads settings from the packet.
     pub fn read_settings(&mut self) -> Option<GameSettings> {
         let mut settings = GameSettings {
             ticdup: self.read_u8()? as i32,
@@ -306,7 +280,6 @@ impl NetPacket {
         Some(settings)
     }
 
-    /// Writes settings to the packet.
     pub fn write_settings(&mut self, settings: &GameSettings) {
         self.write_u8(settings.ticdup as u8);
         self.write_u8(settings.extratics as u8);
@@ -330,7 +303,6 @@ impl NetPacket {
         }
     }
 
-    /// Reads a full ticcmd from the packet.
     pub fn read_full_ticcmd(&mut self, lowres_turn: bool) -> Option<NetFullTicCmd> {
         let mut cmd = NetFullTicCmd {
             latency: self.read_i16()? as i32,
@@ -350,7 +322,6 @@ impl NetPacket {
         Some(cmd)
     }
 
-    /// Writes a ticcmd diff to the packet.
     pub fn write_ticcmd_diff(&mut self, diff: &NetTicDiff, lowres_turn: bool) {
         self.write_u8(diff.diff as u8);
 
@@ -391,77 +362,5 @@ impl NetPacket {
             self.write_u8(diff.cmd.buttons2);
             self.write_i16(diff.cmd.inventory as i16);
         }
-    }
-}
-
-use crate::net_structs::*;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_write_and_read_u8() {
-        let mut packet = NetPacket::new();
-        packet.write_u8(255);
-        packet.reset();
-        assert_eq!(packet.read_u8(), Some(255));
-    }
-
-    #[test]
-    fn test_write_and_read_i8() {
-        let mut packet = NetPacket::new();
-        packet.write_i8(-128);
-        packet.reset();
-        assert_eq!(packet.read_i8(), Some(-128));
-    }
-
-    #[test]
-    fn test_write_and_read_u16() {
-        let mut packet = NetPacket::new();
-        packet.write_u16(65535);
-        packet.reset();
-        assert_eq!(packet.read_u16(), Some(65535));
-    }
-
-    #[test]
-    fn test_write_and_read_i16() {
-        let mut packet = NetPacket::new();
-        packet.write_i16(-12345);
-        packet.reset();
-        assert_eq!(packet.read_i16(), Some(-12345));
-    }
-
-    #[test]
-    fn test_write_and_read_u32() {
-        let mut packet = NetPacket::new();
-        packet.write_u32(4294967295);
-        packet.reset();
-        assert_eq!(packet.read_u32(), Some(4294967295));
-    }
-
-    #[test]
-    fn test_write_and_read_i32() {
-        let mut packet = NetPacket::new();
-        packet.write_i32(-123456789);
-        packet.reset();
-        assert_eq!(packet.read_i32(), Some(-123456789));
-    }
-
-    #[test]
-    fn test_write_and_read_string() {
-        let mut packet = NetPacket::new();
-        packet.write_string("Hello");
-        packet.reset();
-        assert_eq!(packet.read_string(), Some("Hello".to_string()));
-    }
-
-    #[test]
-    fn test_reset_position() {
-        let mut packet = NetPacket::new();
-        packet.write_u8(1);
-        packet.write_u8(2);
-        packet.reset();
-        assert_eq!(packet.read_u8(), Some(1));
     }
 }

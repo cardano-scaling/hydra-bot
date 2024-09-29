@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use std::fs::File;
 use std::io::Read;
 use std::net::SocketAddr;
@@ -9,7 +7,7 @@ use std::time::Duration;
 
 use argh::FromArgs;
 use sha1::{Digest, Sha1};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 mod game;
 mod net_client;
@@ -18,7 +16,7 @@ mod net_structs;
 
 use self::game::Game;
 use self::net_client::NetClient;
-use self::net_structs::{ConnectData, NetAddr};
+use self::net_structs::{ConnectData, GameMode, GameMission};
 
 #[derive(FromArgs)]
 /// An AI player implementation compatible with Chocolate Doom v3.
@@ -38,13 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Args = argh::from_env();
 
     info!("Initializing client");
-    let mut client = match NetClient::new("Player1".to_string(), false) {
-        Ok(client) => client,
-        Err(e) => {
-            error!("Failed to initialize client: {}", e);
-            return Err(e.into());
-        }
-    };
+    let mut client = NetClient::new("HydraBot".to_string(), true)?;
     client.init();
 
     info!("Initializing game");
@@ -60,29 +52,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wad_sha1 = Sha1::digest(&wad_contents);
 
     let connect_data = ConnectData {
-        gamemode: 0,    // Commercial
-        gamemission: 2, // Doom 2
+        gamemode: GameMode::Commercial as i32,
+        gamemission: GameMission::Doom2 as i32,
         lowres_turn: 0,
-        drone: 0,
+        drone: 1, // Set to 1 for bot
         max_players: 4,
         is_freedoom: 0,
         wad_sha1sum: wad_sha1.into(),
-        deh_sha1sum: [0; 20], // Replace with actual SHA1 sum if DEH file is used
+        deh_sha1sum: [0; 20],
         player_class: 0,
     };
 
-    match client.connect(NetAddr::from(server_addr), connect_data) {
+    match client.connect(server_addr, connect_data) {
         Ok(_) => {
             info!("Connected to server successfully");
         }
         Err(e) => {
             error!("Failed to connect to server: {}", e);
-
-            // Try to get more information about the connection failure
             if let Some(reject_reason) = client.get_reject_reason() {
                 error!("Server rejection reason: {}", reject_reason);
             }
-
             return Err(e.into());
         }
     }
@@ -98,18 +87,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         game.tick(&mut client);
-
-        // Run the client
         client.run();
-
-        // Add some delay to prevent busy-waiting
         thread::sleep(Duration::from_millis(10));
-        debug!("TICK!");
+        debug!("Tick");
 
-        // Check if the client is still connected
         if !client.is_connected() {
             error!("Lost connection to server");
-
             break;
         }
     }

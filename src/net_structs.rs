@@ -1,18 +1,12 @@
 use serde::{Deserialize, Serialize};
-use std::ffi::c_void;
 use std::time::Instant;
-
-use crate::net_packet::NetPacket;
 
 pub const MAXNETNODES: usize = 16;
 pub const NET_MAXPLAYERS: usize = 8;
 pub const MAXPLAYERNAME: usize = 30;
 pub const BACKUPTICS: usize = 128;
-pub const NET_MAGIC_NUMBER: u32 = 1454104972;
-pub const NET_OLD_MAGIC_NUMBER: u32 = 3436803284;
 pub const NET_RELIABLE_PACKET: u16 = 1 << 15;
 
-// TicDiff Flags
 pub const NET_TICDIFF_FORWARD: u32 = 1 << 0;
 pub const NET_TICDIFF_SIDE: u32 = 1 << 1;
 pub const NET_TICDIFF_TURN: u32 = 1 << 2;
@@ -21,8 +15,6 @@ pub const NET_TICDIFF_CONSISTANCY: u32 = 1 << 4;
 pub const NET_TICDIFF_CHATCHAR: u32 = 1 << 5;
 pub const NET_TICDIFF_RAVEN: u32 = 1 << 6;
 pub const NET_TICDIFF_STRIFE: u32 = 1 << 7;
-
-pub const BT_SPECIAL: u8 = 0x80;
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct TicCmd {
@@ -80,10 +72,6 @@ pub enum NetProtocol {
     Unknown,
 }
 
-impl NetProtocol {
-    pub const NUM_PROTOCOLS: usize = 2;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NetPacketType {
     Syn,
@@ -105,62 +93,50 @@ pub enum NetPacketType {
     NatHolePunch,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NetMasterPacketType {
-    Add,
-    AddResponse,
-    Query,
-    QueryResponse,
-    GetMetadata,
-    GetMetadataResponse,
-    SignStart,
-    SignStartResponse,
-    SignEnd,
-    SignEndResponse,
-    NatHolePunch,
-    NatHolePunchAll,
-}
-
-pub struct NetModule {
-    pub init_client: fn() -> bool,
-    pub init_server: fn() -> bool,
-    pub send_packet: fn(addr: &NetAddr, packet: &NetPacket),
-    pub recv_packet: fn(addr: &mut Option<NetAddr>, packet: &mut Option<NetPacket>) -> bool,
-    pub addr_to_string: fn(addr: &NetAddr, buffer: &mut String, buffer_len: usize),
-    pub free_address: fn(addr: &mut NetAddr),
-    pub resolve_address: fn(addr: &str) -> Option<NetAddr>,
-}
-
-use std::net::SocketAddr;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct NetAddr {
-    pub module: *mut NetModule,
-    pub refcount: i32,
-    pub handle: *mut c_void,
-    pub socket_addr: SocketAddr,
-}
-
-impl From<SocketAddr> for NetAddr {
-    fn from(addr: SocketAddr) -> Self {
-        NetAddr {
-            module: std::ptr::null_mut(),
-            refcount: 1,
-            handle: std::ptr::null_mut(),
-            socket_addr: addr,
+impl NetPacketType {
+    pub fn from_u16(value: u16) -> Option<Self> {
+        match value {
+            0 => Some(NetPacketType::Syn),
+            1 => Some(NetPacketType::Ack),
+            2 => Some(NetPacketType::Rejected),
+            3 => Some(NetPacketType::KeepAlive),
+            4 => Some(NetPacketType::WaitingData),
+            5 => Some(NetPacketType::GameStart),
+            6 => Some(NetPacketType::GameData),
+            7 => Some(NetPacketType::GameDataAck),
+            8 => Some(NetPacketType::Disconnect),
+            9 => Some(NetPacketType::DisconnectAck),
+            10 => Some(NetPacketType::ReliableAck),
+            11 => Some(NetPacketType::GameDataResend),
+            12 => Some(NetPacketType::ConsoleMessage),
+            13 => Some(NetPacketType::Query),
+            14 => Some(NetPacketType::QueryResponse),
+            15 => Some(NetPacketType::Launch),
+            16 => Some(NetPacketType::NatHolePunch),
+            _ => None,
         }
     }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct NetContext {
-    // Define fields as necessary
-}
-
-impl NetContext {
-    pub fn recv_packet(&self) -> Option<(NetAddr, NetPacket)> {
-        // Implement the logic to receive a packet
-        None // Placeholder
+    pub fn to_u16(self) -> u16 {
+        match self {
+            NetPacketType::Syn => 0,
+            NetPacketType::Ack => 1,
+            NetPacketType::Rejected => 2,
+            NetPacketType::KeepAlive => 3,
+            NetPacketType::WaitingData => 4,
+            NetPacketType::GameStart => 5,
+            NetPacketType::GameData => 6,
+            NetPacketType::GameDataAck => 7,
+            NetPacketType::Disconnect => 8,
+            NetPacketType::DisconnectAck => 9,
+            NetPacketType::ReliableAck => 10,
+            NetPacketType::GameDataResend => 11,
+            NetPacketType::ConsoleMessage => 12,
+            NetPacketType::Query => 13,
+            NetPacketType::QueryResponse => 14,
+            NetPacketType::Launch => 15,
+            NetPacketType::NatHolePunch => 16,
+        }
     }
 }
 
@@ -179,18 +155,6 @@ pub struct NetFullTicCmd {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct NetQueryData {
-    pub version: String,
-    pub server_state: i32,
-    pub num_players: i32,
-    pub max_players: i32,
-    pub gamemode: i32,
-    pub gamemission: i32,
-    pub description: String,
-    pub protocol: NetProtocol,
-}
-
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct NetWaitData {
     pub num_players: i32,
     pub num_drones: i32,
@@ -206,6 +170,15 @@ pub struct NetWaitData {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GameMode {
+    Shareware,
+    Registered,
+    Commercial,
+    Retail,
+    Indetermined,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameMission {
     Doom,
     Doom2,
@@ -217,15 +190,6 @@ pub enum GameMission {
     Hexen,
     Strife,
     None,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GameMode {
-    Shareware,
-    Registered,
-    Commercial,
-    Retail,
-    Indetermined,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,40 +232,12 @@ pub enum Skill {
 pub enum ClientState {
     #[default]
     Disconnected,
+    Connecting,
+    Connected,
     WaitingLaunch,
     WaitingStart,
     InGame,
-    DisconnectedSleep,
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct NetConnection {
-    // Add necessary fields here
-    pub state: ConnectionState,
-    pub protocol: NetProtocol,
-    pub connected: bool,
-}
-
-impl NetConnection {
-    pub fn run(&mut self) {
-        // Implement run logic
-    }
-
-    pub fn disconnect(&mut self) {
-        // Implement disconnect logic
-    }
-
-    pub fn send_packet(&self, packet: &NetPacket, addr: &NetAddr) {
-        // Implement send_packet logic
-    }
-
-    pub fn send_reliable_packet(&self, packet: &NetPacket) {
-        // Implement send_reliable_packet logic
-    }
-
-    pub fn init_client(&mut self, addr: &NetAddr, connect_data: &ConnectData) {
-        // Implement init_client logic
-    }
+    Disconnecting,
 }
 
 #[derive(Clone, Copy)]
@@ -340,19 +276,9 @@ impl Default for NetServerSend {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ConnectionState {
-    #[default]
-    Connecting,
-    Connected,
-    Disconnected,
-    DisconnectedSleep,
-}
-
 #[derive(Debug, Clone)]
-pub struct SendQueueEntry {
-    pub active: bool,
-    pub seq: u32,
-    pub time: Instant,
-    pub cmd: NetTicDiff,
+pub struct NetReliablePacket {
+    pub packet: crate::net_packet::NetPacket,
+    pub seq: u8,
+    pub last_send_time: Instant,
 }

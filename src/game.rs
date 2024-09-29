@@ -1,7 +1,7 @@
 use crate::net_client::NetClient;
-use crate::net_structs::{GameSettings, TicCmd, BACKUPTICS, NET_MAXPLAYERS};
+use crate::net_structs::{TicCmd, BACKUPTICS, NET_MAXPLAYERS};
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 pub const TICRATE: u32 = 35;
 const MAX_NETGAME_STALL_TICS: u32 = 2;
@@ -31,6 +31,7 @@ pub struct Game {
     frameon: i32,
     oldnettics: i32,
     oldentertics: i32,
+    last_net_update: Instant,
 }
 
 impl Game {
@@ -60,6 +61,7 @@ impl Game {
             frameon: 0,
             oldnettics: 0,
             oldentertics: 0,
+            last_net_update: Instant::now(),
         }
     }
 
@@ -116,14 +118,19 @@ impl Game {
             return;
         }
 
+        let now = Instant::now();
+        if now.duration_since(self.last_net_update) < Duration::from_millis(1000 / TICRATE as u64) {
+            return;
+        }
+        self.last_net_update = now;
+
         let nowtime = self.get_adjusted_time();
-        let mut newtics = nowtime.saturating_sub(self.lasttime as u32);
         self.lasttime = nowtime as i32;
 
         client.run();
 
         let nowtime = (self.get_adjusted_time() / self.ticdup as u32) as i32;
-        newtics = nowtime.saturating_sub(self.lasttime) as u32;
+        let mut newtics = nowtime.saturating_sub(self.lasttime) as u32;
 
         self.lasttime = nowtime;
 
@@ -148,8 +155,7 @@ impl Game {
 
     pub fn tick(&mut self, client: &mut NetClient) {
         let enter_tic = (self.get_adjusted_time() / self.ticdup as u32) as i32;
-        let mut realtics;
-        let mut availabletics;
+
         let mut counts;
         let mut lowtic;
 
@@ -161,33 +167,19 @@ impl Game {
 
         lowtic = self.get_low_tic();
 
-        availabletics = lowtic - self.gametic / self.ticdup;
+        let availabletics = lowtic - self.gametic / self.ticdup;
 
-        realtics = enter_tic - self.oldentertics;
+        let realtics = enter_tic - self.oldentertics;
         self.oldentertics = enter_tic;
 
         if self.new_sync {
             counts = availabletics;
         } else {
-            if realtics < availabletics - 1 {
-                counts = realtics + 1;
-            } else if realtics < availabletics {
-                counts = realtics;
-            } else {
-                counts = availabletics;
-            }
-
-            if counts < 1 {
-                counts = 1;
-            }
+            counts = realtics.min(availabletics).max(1);
 
             if client.is_connected() {
                 self.old_net_sync();
             }
-        }
-
-        if counts < 1 {
-            counts = 1;
         }
 
         while !self.players_in_game(client) || lowtic < self.gametic / self.ticdup + counts {
@@ -242,13 +234,7 @@ impl Game {
     }
 
     fn get_low_tic(&self) -> i32 {
-        let mut lowtic = self.maketic;
-
-        if self.recvtic < lowtic {
-            lowtic = self.recvtic;
-        }
-
-        lowtic
+        self.maketic.min(self.recvtic)
     }
 
     fn old_net_sync(&mut self) {
