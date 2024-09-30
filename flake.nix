@@ -31,6 +31,11 @@
           cargo = rust;
         };
 
+        server-config = pkgs.writeText "chocolate-doom.cfg" ''
+          log_file = "chocolate-doom.log"
+          log_level = "debug"
+        '';
+
         run-server = pkgs.writeShellApplication {
           name = "hydra-bot-run-server";
 
@@ -39,7 +44,15 @@
           ];
 
           text = ''
-            exec chocolate-server -privateserver -dedicated -port 2342 -nodes 2
+            temp_dir=$(mktemp -d)
+            cd "$temp_dir"
+            touch chocolate-doom.log
+
+            chocolate-doom -server -privateserver -dedicated -port 2342 -config ${server-config} &
+            server_pid=$!
+
+            trap 'kill -9 $server_pid; rm -rf "$temp_dir"' EXIT INT TERM
+            tail -f chocolate-doom.log || kill -9 $server_pid
           '';
         };
 
