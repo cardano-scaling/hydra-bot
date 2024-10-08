@@ -1,7 +1,7 @@
 use rand::prelude::*;
-use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant};
+use std::{io, thread};
 use tracing::{debug, error, info, warn};
 
 use super::packet::Packet;
@@ -264,7 +264,10 @@ impl Client {
     fn parse_packet(&mut self, packet: &mut Packet) {
         let original_data = packet.data.clone();
         if let Some(packet_type) = packet.read_u16().and_then(PacketType::from_u16) {
-            debug!("Received packet: type={:?}, data={:x?}", packet_type, original_data);
+            debug!(
+                "Received packet: type={:?}, data={:x?}",
+                packet_type, original_data
+            );
             match packet_type {
                 PacketType::Syn => self.parse_syn(packet),
                 PacketType::Rejected => self.parse_reject(packet),
@@ -297,12 +300,6 @@ impl Client {
             self.state = ClientState::Disconnected;
             self.shutdown();
         }
-    }
-
-    fn send_disconnect_ack(&self) {
-        let mut packet = Packet::new();
-        packet.write_u16(PacketType::DisconnectAck.to_u16());
-        self.send_packet(&packet);
     }
 
     fn parse_syn(&mut self, packet: &mut Packet) {
@@ -365,7 +362,7 @@ impl Client {
     fn send_disconnect_ack(&self) {
         let mut packet = Packet::new();
         packet.write_u16(PacketType::DisconnectAck.to_u16());
-        packet.write_u32(0x80); // This seems to be the value used in the captured packet
+        packet.write_u32(0x80);
         self.send_packet(&packet);
     }
 
@@ -989,13 +986,16 @@ impl Client {
 
             for _ in 0..10 {
                 self.run();
+                let reject_reason = self.reject_reason.clone();
+
                 if self.state == ClientState::Connected {
                     break;
-                } else if let Some(reject_reason) = &self.reject_reason {
+                } else if let Some(reject_reason) = reject_reason {
                     self.disconnect();
                     return Err(format!("Connection rejected: {}", reject_reason));
                 }
-                std::thread::sleep(Duration::from_millis(200));
+
+                thread::sleep(Duration::from_millis(200));
             }
 
             if self.state == ClientState::Connected {
@@ -1011,7 +1011,7 @@ impl Client {
                 "Connection attempt {} failed, retrying...",
                 self.num_retries
             );
-            std::thread::sleep(Duration::from_secs(2));
+            thread::sleep(Duration::from_secs(2));
         }
 
         Err(format!(
