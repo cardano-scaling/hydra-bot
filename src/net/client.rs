@@ -1021,33 +1021,30 @@ impl Client {
     fn send_syn(&mut self, data: &ConnectData) {
         let mut packet = Packet::new();
 
-        // Message Type (SYN)
+        let mut packet = Packet::new();
+
+        // 1. Packet Type (SYN)
         packet.write_u16(PacketType::Syn.to_u16());
 
-        // Session ID / Timestamp (using current time)
-        packet.write_u32(
-            (SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                & 0xFFFFFFFF) as u32,
-        );
+        // 2. Random Challenge
+        packet.write_u32(rand::random());
 
-        // Client Version String
+        // 3. Game Description
         packet.write_string("Chocolate Doom 3.0.1");
 
-        // Number of Supported Protocols
-        packet.write_u8(1); // We support 1 protocol
+        // 4. Number of Protocols
+        packet.write_u8(1);
 
-        // Protocol Identifier
+        // 5. Protocol Identifier
         packet.write_string("CHOCOLATE_DOOM_0");
 
-        // Calculate Data Length
+        // 6. Calculate Data Length
         let player_name_len = self.player_name.len() + 1; // +1 for null terminator
         let data_length = 6 + 20 + 20 + 1 + player_name_len; // Total bytes of connect data
 
         packet.write_u32(data_length as u32);
 
+        // 7. Connect Data
         // Game Parameters
         packet.write_u8(data.gamemode as u8);
         packet.write_u8(data.gamemission as u8);

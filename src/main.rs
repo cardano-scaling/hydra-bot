@@ -43,7 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Connecting to server");
     let server_addr = args.address.parse::<SocketAddr>()?;
 
-    // Read WAD file and compute SHA1
     let mut wad_file = File::open(&args.iwad)?;
     let mut wad_contents = Vec::new();
     wad_file.read_to_end(&mut wad_contents)?;
@@ -56,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let connect_data = ConnectData {
         gamemode: GameMode::Commercial as i32,
-        gamemission: GameMission::Doom2 as i32,
+        gamemission: GameMission::Doom as i32,
         lowres_turn: 0,
         drone: 1,
         max_players: 8,
@@ -94,12 +93,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!("Waiting for game to start...");
+
     loop {
         client.run();
+
         if let Some(settings) = client.get_settings() {
             info!("Game started with settings: {:?}", settings);
             break;
         }
+
         thread::sleep(Duration::from_millis(100));
     }
 
