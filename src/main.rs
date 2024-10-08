@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use argh::FromArgs;
 use sha1::{Digest, Sha1};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 mod game;
 mod net;
@@ -53,8 +53,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         gamemode: GameMode::Commercial as i32,
         gamemission: GameMission::Doom2 as i32,
         lowres_turn: 0,
-        drone: 1, // Set to 1 for bot
-        max_players: 8, // Increased from 4 to 8
+        drone: 1,
+        max_players: 8,
         is_freedoom: 0,
         wad_sha1sum: wad_sha1.into(),
         deh_sha1sum: [0; 20],
