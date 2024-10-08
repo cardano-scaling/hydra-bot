@@ -1033,28 +1033,23 @@ impl Client {
         // Client Version String
         packet.write_string("Chocolate Doom 3.0.1");
         
-        // Delimiter / Unknown Field
-        packet.write_u16(0x0001);
+        // Number of Supported Protocols
+        packet.write_u8(1); // We support 1 protocol
         
         // Protocol Identifier
         packet.write_string("CHOCOLATE_DOOM_0");
         
-        // Delimiter / Unknown Field
-        packet.write_u16(0x0001);
         
-        // Data Length (fixed value as per original message)
-        packet.write_u32(0x00000004);
+        // Data Length (number of bytes for the connect data that follows)
+        packet.write_u32(4); // Adjust this value if connect data length changes
         
-        // Connect Data
+        // Connect Data (as per data length)
         packet.write_u8(data.gamemode as u8);
         packet.write_u8(data.gamemission as u8);
         packet.write_u8(data.lowres_turn as u8);
         packet.write_u8(data.drone as u8);
-        packet.write_u8(data.max_players as u8);
-        packet.write_u8(data.is_freedoom as u8);
-        packet.write_blob(&data.wad_sha1sum);
-        packet.write_blob(&data.deh_sha1sum);
-        packet.write_u8(data.player_class as u8);
+
+        // If additional connect data fields are needed, write them here and update data length
         
         // Username
         packet.write_string(&self.player_name);
