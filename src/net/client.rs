@@ -287,9 +287,9 @@ impl Client {
         }
     }
 
-    fn parse_disconnect(&mut self, _packet: &mut Packet) {
+    fn parse_disconnect(&mut self, packet: &mut Packet) {
         info!("Received disconnect request from server");
-        self.send_disconnect_ack();
+        self.send_disconnect_ack(packet);
         self.state = ClientState::Disconnected;
         self.shutdown();
     }
@@ -313,7 +313,7 @@ impl Client {
             self.state = ClientState::Connected;
 
             // Send an ACK packet in response to the SYN
-            self.send_ack();
+            self.send_ack(packet);
 
             if server_version != env!("CARGO_PKG_VERSION") {
                 warn!(
@@ -329,8 +329,7 @@ impl Client {
         }
     }
 
-    fn send_ack(&mut self) {
-        let mut packet = Packet::new();
+    fn send_ack(&mut self, packet: &mut Packet) {
         packet.write_u16(PacketType::Ack.to_u16());
         packet.write_protocol(self.protocol);
         self.send_packet(&packet);
@@ -359,8 +358,7 @@ impl Client {
         }
     }
 
-    fn send_disconnect_ack(&self) {
-        let mut packet = Packet::new();
+    fn send_disconnect_ack(&self, packet: &mut Packet) {
         packet.write_u16(PacketType::DisconnectAck.to_u16());
         packet.write_u32(0x80);
         self.send_packet(&packet);
@@ -378,7 +376,7 @@ impl Client {
                 self.is_freedoom = self.net_client_wait_data.is_freedoom;
 
                 // Send an ACK in response to waiting data
-                self.send_ack();
+                self.send_ack(packet);
             }
         }
     }
@@ -428,6 +426,7 @@ impl Client {
 
     fn parse_game_start(&mut self, packet: &mut Packet) {
         debug!("Processing game start packet");
+
         if let Some(settings) = packet.read_settings() {
             if self.validate_game_settings(&settings) {
                 info!("Initiating game state with settings: {:?}", settings);
@@ -439,7 +438,7 @@ impl Client {
                 self.player_class = settings.player_classes[settings.consoleplayer as usize];
 
                 // Send an ACK in response to game start
-                self.send_ack();
+                self.send_ack(packet);
             }
         }
     }
@@ -1018,9 +1017,7 @@ impl Client {
         ))
     }
 
-    fn send_syn(&mut self, data: &ConnectData) {
-        let mut packet = Packet::new();
-
+    fn send_syn(&mut self, connect_data: &ConnectData) {
         let mut packet = Packet::new();
 
         // 1. Packet Type (SYN)
@@ -1040,29 +1037,23 @@ impl Client {
 
         // 6. Calculate Data Length
         let player_name_len = self.player_name.len() + 1; // +1 for null terminator
-        let data_length = 6 + 20 + 20 + 1 + player_name_len; // Total bytes of connect data
+        let data_length = 6 + 20 + 20 + 1 + player_name_len; // Should be around 56 bytes
 
+        // Write Data Length in Little-Endian
         packet.write_u32(data_length as u32);
 
         // 7. Connect Data
         // Game Parameters
-        packet.write_u8(data.gamemode as u8);
-        packet.write_u8(data.gamemission as u8);
-        packet.write_u8(data.lowres_turn as u8);
-        packet.write_u8(data.drone as u8);
-        packet.write_u8(data.max_players as u8);
-        packet.write_u8(data.is_freedoom as u8);
-
-        // WAD SHA1 Checksum
-        packet.write_blob(&data.wad_sha1sum);
-
-        // DEH SHA1 Checksum
-        packet.write_blob(&data.deh_sha1sum);
-
-        // Player Class
-        packet.write_u8(data.player_class as u8);
-
-        // Player Name
+        // 7. Connect Data
+        packet.write_u8(connect_data.gamemode as u8);
+        packet.write_u8(connect_data.gamemission as u8);
+        packet.write_u8(connect_data.lowres_turn as u8);
+        packet.write_u8(connect_data.drone as u8);
+        packet.write_u8(connect_data.max_players as u8);
+        packet.write_u8(connect_data.is_freedoom as u8);
+        packet.write_blob(&connect_data.wad_sha1sum);
+        packet.write_blob(&connect_data.deh_sha1sum);
+        packet.write_u8(connect_data.player_class as u8);
         packet.write_string(&self.player_name);
 
         // Send the packet
