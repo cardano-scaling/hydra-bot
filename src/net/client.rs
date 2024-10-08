@@ -357,8 +357,16 @@ impl Client {
                 warn!("Connection rejected: {}", msg);
                 self.state = ClientState::Disconnected;
                 self.reject_reason = Some(msg);
+                self.shutdown();
             }
         }
+    }
+
+    fn send_disconnect_ack(&self) {
+        let mut packet = Packet::new();
+        packet.write_u16(PacketType::DisconnectAck.to_u16());
+        packet.write_u32(0x80); // This seems to be the value used in the captured packet
+        self.send_packet(&packet);
     }
 
     fn parse_waiting_data(&mut self, packet: &mut Packet) {
@@ -888,20 +896,14 @@ impl Client {
         packet.write_u16(PacketType::Disconnect.to_u16());
         self.send_packet(&packet);
 
-        while self.state == ClientState::Disconnecting {
-            self.run();
-
-            if self.start_time.elapsed() > Duration::from_secs(5) {
-                warn!("No acknowledgment of disconnect received");
-                self.state = ClientState::Disconnected;
-                break;
-            }
-
-            std::thread::sleep(Duration::from_millis(10));
+        // Send multiple disconnect acknowledgments
+        for _ in 0..5 {
+            self.send_disconnect_ack();
         }
 
-        info!("Disconnect complete");
+        self.state = ClientState::Disconnected;
         self.shutdown();
+        info!("Disconnect complete");
     }
 
     pub fn get_settings(&self) -> Option<GameSettings> {
@@ -986,12 +988,14 @@ impl Client {
             self.num_retries += 1;
 
             for _ in 0..10 {
-                // Increased from 5 to 10
                 self.run();
                 if self.state == ClientState::Connected {
                     break;
+                } else if let Some(reject_reason) = &self.reject_reason {
+                    self.disconnect();
+                    return Err(format!("Connection rejected: {}", reject_reason));
                 }
-                std::thread::sleep(Duration::from_millis(200)); // Increased from 100 to 200
+                std::thread::sleep(Duration::from_millis(200));
             }
 
             if self.state == ClientState::Connected {
@@ -1007,7 +1011,7 @@ impl Client {
                 "Connection attempt {} failed, retrying...",
                 self.num_retries
             );
-            std::thread::sleep(Duration::from_secs(2)); // Increased from 1 to 2
+            std::thread::sleep(Duration::from_secs(2));
         }
 
         Err(format!(
