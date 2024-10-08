@@ -313,6 +313,9 @@ impl Client {
             info!("Connected to server");
             self.state = ClientState::Connected;
 
+            // Send an ACK packet in response to the SYN
+            self.send_ack();
+
             if server_version != env!("CARGO_PKG_VERSION") {
                 warn!(
                     "Version mismatch: Client is '{}', but the server is '{}'. \
@@ -325,6 +328,14 @@ impl Client {
             error!("No common protocol");
             self.reject_reason = Some("No common protocol".to_string());
         }
+    }
+
+    fn send_ack(&mut self) {
+        let mut packet = Packet::new();
+        packet.write_u16(PacketType::Ack.to_u16());
+        packet.write_protocol(&self.protocol);
+        self.send_packet(&packet);
+        info!("ACK sent to server");
     }
 
     fn negotiate_protocol(&self, packet: &mut Packet) -> Option<Protocol> {
@@ -353,8 +364,25 @@ impl Client {
             if self.validate_wait_data(&wait_data) {
                 self.net_client_wait_data = wait_data;
                 self.net_client_received_wait_data = true;
+
+                // Update game-specific fields
+                self.gamemode = self.net_client_wait_data.gamemode;
+                self.gamemission = self.net_client_wait_data.gamemission;
+                self.max_players = self.net_client_wait_data.max_players;
+                self.is_freedoom = self.net_client_wait_data.is_freedoom;
+
+                // Send a response to confirm receipt of waiting data
+                self.send_waiting_data_response();
             }
         }
+    }
+
+    fn send_waiting_data_response(&mut self) {
+        let mut packet = Packet::new();
+        packet.write_u16(PacketType::WaitingData.to_u16());
+        packet.write_string(&self.player_name);
+        self.send_packet(&packet);
+        info!("Waiting data response sent to server");
     }
 
     fn validate_wait_data(&self, wait_data: &WaitData) -> bool {
@@ -373,6 +401,9 @@ impl Client {
                 self.net_client_wait_data.num_players = num_players as i32;
                 self.state = ClientState::WaitingStart;
                 info!("Now waiting to start the game");
+
+                // Send a response to confirm receipt of launch packet
+                self.send_launch_response();
             }
         } else {
             warn!(
@@ -380,6 +411,13 @@ impl Client {
                 self.state
             );
         }
+    }
+
+    fn send_launch_response(&mut self) {
+        let mut packet = Packet::new();
+        packet.write_u16(PacketType::Launch.to_u16());
+        self.send_packet(&packet);
+        info!("Launch response sent to server");
     }
 
     fn parse_game_start(&mut self, packet: &mut Packet) {
@@ -390,8 +428,22 @@ impl Client {
                 self.state = ClientState::InGame;
                 self.settings = Some(settings);
                 self.init_game_state();
+
+                // Update game-specific fields
+                self.lowres_turn = settings.lowres_turn;
+                self.player_class = settings.player_classes[settings.consoleplayer as usize];
+
+                // Send a response to confirm receipt of game start
+                self.send_game_start_response();
             }
         }
+    }
+
+    fn send_game_start_response(&mut self) {
+        let mut packet = Packet::new();
+        packet.write_u16(PacketType::GameStart.to_u16());
+        self.send_packet(&packet);
+        info!("Game start response sent to server");
     }
 
     fn validate_game_settings(&self, settings: &GameSettings) -> bool {
