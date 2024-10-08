@@ -21,6 +21,10 @@ impl Packet {
         self.data.extend_from_slice(data);
     }
 
+    pub fn write_u16(&mut self, value: u16) {
+        self.data.extend_from_slice(&value.to_be_bytes());
+    }
+
     fn read_ticcmd_diff(&mut self, lowres_turn: bool) -> Option<TicDiff> {
         let mut diff = TicDiff {
             diff: self.read_u8()? as u32,

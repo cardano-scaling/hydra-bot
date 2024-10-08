@@ -1042,12 +1042,10 @@ impl Client {
         // Delimiter / Unknown Field
         packet.write_u16(0x0001);
         
-        // Data Length (placeholder, to be filled later)
-        let length_pos = packet.data.len();
-        packet.write_u32(0);
+        // Data Length (fixed value as per original message)
+        packet.write_u32(0x00000004);
         
         // Connect Data
-        let connect_data_start = packet.data.len();
         packet.write_u8(data.gamemode as u8);
         packet.write_u8(data.gamemission as u8);
         packet.write_u8(data.lowres_turn as u8);
@@ -1057,11 +1055,6 @@ impl Client {
         packet.write_blob(&data.wad_sha1sum);
         packet.write_blob(&data.deh_sha1sum);
         packet.write_u8(data.player_class as u8);
-        let connect_data_length = packet.data.len() - connect_data_start;
-        
-        // Update the data length field
-        let length_bytes = (connect_data_length as u32).to_be_bytes();
-        packet.data[length_pos..length_pos + 4].copy_from_slice(&length_bytes);
         
         // Username
         packet.write_string(&self.player_name);
