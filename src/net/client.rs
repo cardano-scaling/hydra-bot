@@ -889,13 +889,11 @@ impl Client {
         self.state = ClientState::Disconnecting;
         self.start_time = Instant::now();
 
-        let mut packet = Packet::new();
-        packet.write_u16(PacketType::Disconnect.to_u16());
-        self.send_packet(&packet);
-
-        // Send multiple disconnect acknowledgments
+        // Send disconnect packet five times
         for _ in 0..5 {
-            self.send_disconnect_ack();
+            let mut packet = Packet::new();
+            packet.write_u16(PacketType::Disconnect.to_u16());
+            self.send_packet(&packet);
         }
 
         self.state = ClientState::Disconnected;
