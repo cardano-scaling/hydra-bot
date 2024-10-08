@@ -1040,23 +1040,35 @@ impl Client {
         packet.write_string("CHOCOLATE_DOOM_0");
         
         
-        // Data Length (number of bytes for the connect data that follows)
-        packet.write_u32(4); // Adjust this value if connect data length changes
-        
-        // Connect Data (as per data length)
-        packet.write_u8(data.gamemode as u8);
-        packet.write_u8(data.gamemission as u8);
-        packet.write_u8(data.lowres_turn as u8);
-        packet.write_u8(data.drone as u8);
+        // Calculate Data Length
+        let player_name_len = self.player_name.len() + 1; // +1 for null terminator
+        let data_length = 6 + 20 + 20 + 1 + player_name_len; // Total bytes of connect data
 
-        // If additional connect data fields are needed, write them here and update data length
-        
-        // Username
+        packet.write_u32(data_length as u32);
+
+        // Game Parameters
+        packet.write_u8(connect_data.gamemode as u8);
+        packet.write_u8(connect_data.gamemission as u8);
+        packet.write_u8(connect_data.lowres_turn as u8);
+        packet.write_u8(connect_data.drone as u8);
+        packet.write_u8(connect_data.max_players as u8);
+        packet.write_u8(connect_data.is_freedoom as u8);
+
+        // WAD SHA1 Checksum
+        packet.write_blob(&connect_data.wad_sha1sum);
+
+        // DEH SHA1 Checksum
+        packet.write_blob(&connect_data.deh_sha1sum);
+
+        // Player Class
+        packet.write_u8(connect_data.player_class as u8);
+
+        // Player Name
         packet.write_string(&self.player_name);
 
+        // Send the packet
         self.send_packet(&packet);
         info!("SYN sent to server: {} bytes", packet.data.len());
-        debug!("SYN packet contents: {:x?}", packet.data);
     }
 
     pub fn build_ticcmd(&mut self, cmd: &mut TicCmd, _maketic: u32) {
