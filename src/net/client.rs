@@ -262,8 +262,9 @@ impl Client {
     }
 
     fn parse_packet(&mut self, packet: &mut Packet) {
+        let original_data = packet.data.clone();
         if let Some(packet_type) = packet.read_u16().and_then(PacketType::from_u16) {
-            debug!("Parsing packet of type: {:?}", packet_type);
+            debug!("Received packet: type={:?}, data={:x?}", packet_type, original_data);
             match packet_type {
                 PacketType::Syn => self.parse_syn(packet),
                 PacketType::Rejected => self.parse_reject(packet),
@@ -275,10 +276,11 @@ impl Client {
                 PacketType::ConsoleMessage => self.parse_console_message(packet),
                 PacketType::Disconnect => self.parse_disconnect(packet),
                 PacketType::DisconnectAck => self.parse_disconnect_ack(packet),
+                PacketType::KeepAlive => debug!("Received keep-alive packet"),
                 _ => warn!("Unhandled packet type: {:?}", packet_type),
             }
         } else {
-            warn!("Unknown packet type");
+            warn!("Unknown packet type: {:x?}", original_data);
         }
     }
 
@@ -365,14 +367,13 @@ impl Client {
                 self.net_client_wait_data = wait_data;
                 self.net_client_received_wait_data = true;
 
-                // Update game-specific fields
-                // self.gamemode = self.net_client_wait_data.gamemode;
-                // self.gamemission = self.net_client_wait_data.gamemission;
+                debug!("Received waiting data: {:?}", self.net_client_wait_data);
+
                 self.max_players = self.net_client_wait_data.max_players;
                 self.is_freedoom = self.net_client_wait_data.is_freedoom;
 
-                // Send a response to confirm receipt of waiting data
-                self.send_waiting_data_response();
+                // Send an ACK in response to waiting data
+                self.send_ack();
             }
         }
     }
@@ -424,17 +425,16 @@ impl Client {
         debug!("Processing game start packet");
         if let Some(settings) = packet.read_settings() {
             if self.validate_game_settings(&settings) {
-                info!("Initiating game state");
+                info!("Initiating game state with settings: {:?}", settings);
                 self.state = ClientState::InGame;
                 self.settings = Some(settings);
                 self.init_game_state();
 
-                // Update game-specific fields
                 self.lowres_turn = settings.lowres_turn;
                 self.player_class = settings.player_classes[settings.consoleplayer as usize];
 
-                // Send a response to confirm receipt of game start
-                self.send_game_start_response();
+                // Send an ACK in response to game start
+                self.send_ack();
             }
         }
     }
@@ -476,6 +476,9 @@ impl Client {
             self.need_acknowledge = true;
             self.gamedata_recv_time = Instant::now();
             self.check_for_missing_tics(seq);
+
+            // Send an immediate ACK for the game data
+            self.send_game_data_ack();
         }
     }
 
@@ -785,7 +788,7 @@ impl Client {
 
     fn receive_tic(
         &self,
-        ticcmds: &[TicCmd; NET_MAXPLAYERS],
+        _ticcmds: &[TicCmd; NET_MAXPLAYERS],
         playeringame: &[bool; NET_MAXPLAYERS],
     ) {
         // TODO: Implement this.
@@ -1017,14 +1020,15 @@ impl Client {
         let mut packet = Packet::new();
         packet.write_u16(PacketType::Syn.to_u16());
         packet.write_u32(NET_MAGIC_NUMBER);
-        packet.write_string(env!("CARGO_PKG_VERSION"));
-        packet.write_protocol_list();
+        packet.write_string("Chocolate Doom 3.0.1");
+        packet.write_u8(1); // Number of protocols
+        packet.write_string("CHOCOLATE_DOOM_0");
         packet.write_connect_data(data);
         packet.write_string(&self.player_name);
 
         self.send_packet(&packet);
         info!("SYN sent to server: {} bytes", packet.data.len());
-        debug!("SYN packet contents: {:?}", packet);
+        debug!("SYN packet contents: {:x?}", packet.data);
     }
 
     pub fn build_ticcmd(&mut self, cmd: &mut TicCmd, _maketic: u32) {
@@ -1063,5 +1067,16 @@ impl Client {
         self.reliable_send_seq = self.reliable_send_seq.wrapping_add(1);
 
         packet
+    }
+
+    pub fn request_launch(&mut self) {
+        if self.state == ClientState::WaitingLaunch {
+            let mut packet = Packet::new();
+            packet.write_u16(PacketType::Launch.to_u16() | NET_RELIABLE_PACKET);
+            packet.write_u8(self.reliable_send_seq);
+            self.send_packet(&packet);
+            debug!("Sent launch request: {:x?}", packet.data);
+            self.reliable_send_seq = self.reliable_send_seq.wrapping_add(1);
+        }
     }
 }
