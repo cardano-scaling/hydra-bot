@@ -83,29 +83,24 @@ impl Packet {
     }
 
     pub fn write_u16(&mut self, value: u16) {
-        self.data.extend(&value.to_be_bytes());
+        self.data.extend_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_i16(&mut self, value: i16) {
-        self.data.extend(&value.to_be_bytes());
+        self.data.extend_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_u32(&mut self, value: u32) {
-        self.data.extend(&value.to_be_bytes());
+        self.data.extend_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_i32(&mut self, value: i32) {
-        self.data.extend(&value.to_be_bytes());
+        self.data.extend_from_slice(&value.to_be_bytes());
     }
 
-    pub fn write_string(&mut self, string: &str) {
-        let bytes = string.as_bytes();
-        for &b in bytes {
-            if b != 0 {
-                self.data.push(b);
-            }
-        }
-        self.data.push(0); // NUL terminator
+    pub fn write_string(&mut self, s: &str) {
+        self.data.extend_from_slice(s.as_bytes());
+        self.data.push(0); // Null terminator
     }
 
     pub fn read_u8(&mut self) -> Option<u8> {
