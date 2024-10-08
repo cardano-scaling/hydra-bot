@@ -1020,12 +1020,50 @@ impl Client {
 
     fn send_syn(&mut self, data: &ConnectData) {
         let mut packet = Packet::new();
+        
+        // Message Type (SYN)
         packet.write_u16(PacketType::Syn.to_u16());
-        packet.write_u32(NET_MAGIC_NUMBER);
+        
+        // Session ID / Timestamp (using current time)
+        packet.write_u32((std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() & 0xFFFFFFFF) as u32);
+        
+        // Client Version String
         packet.write_string("Chocolate Doom 3.0.1");
-        packet.write_u8(1); // Number of protocols
+        
+        // Delimiter / Unknown Field
+        packet.write_u16(0x0001);
+        
+        // Protocol Identifier
         packet.write_string("CHOCOLATE_DOOM_0");
-        packet.write_connect_data(data);
+        
+        // Delimiter / Unknown Field
+        packet.write_u16(0x0001);
+        
+        // Data Length (placeholder, to be filled later)
+        let length_pos = packet.data.len();
+        packet.write_u32(0);
+        
+        // Connect Data
+        let connect_data_start = packet.data.len();
+        packet.write_u8(data.gamemode as u8);
+        packet.write_u8(data.gamemission as u8);
+        packet.write_u8(data.lowres_turn as u8);
+        packet.write_u8(data.drone as u8);
+        packet.write_u8(data.max_players as u8);
+        packet.write_u8(data.is_freedoom as u8);
+        packet.write_blob(&data.wad_sha1sum);
+        packet.write_blob(&data.deh_sha1sum);
+        packet.write_u8(data.player_class as u8);
+        let connect_data_length = packet.data.len() - connect_data_start;
+        
+        // Update the data length field
+        let length_bytes = (connect_data_length as u32).to_be_bytes();
+        packet.data[length_pos..length_pos + 4].copy_from_slice(&length_bytes);
+        
+        // Username
         packet.write_string(&self.player_name);
 
         self.send_packet(&packet);
