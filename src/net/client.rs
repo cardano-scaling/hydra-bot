@@ -333,7 +333,7 @@ impl Client {
     fn send_ack(&mut self) {
         let mut packet = Packet::new();
         packet.write_u16(PacketType::Ack.to_u16());
-        packet.write_protocol(&self.protocol);
+        packet.write_protocol(self.protocol);
         self.send_packet(&packet);
         info!("ACK sent to server");
     }
@@ -366,8 +366,8 @@ impl Client {
                 self.net_client_received_wait_data = true;
 
                 // Update game-specific fields
-                self.gamemode = self.net_client_wait_data.gamemode;
-                self.gamemission = self.net_client_wait_data.gamemission;
+                // self.gamemode = self.net_client_wait_data.gamemode;
+                // self.gamemission = self.net_client_wait_data.gamemission;
                 self.max_players = self.net_client_wait_data.max_players;
                 self.is_freedoom = self.net_client_wait_data.is_freedoom;
 

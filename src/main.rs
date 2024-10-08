@@ -49,6 +49,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     wad_file.read_to_end(&mut wad_contents)?;
     let wad_sha1 = Sha1::digest(&wad_contents);
 
+    info!(
+        sha1 = hex::encode(&wad_sha1),
+        "Calculated SHA1 for the WAD file"
+    );
+
     let connect_data = ConnectData {
         gamemode: GameMode::Commercial as i32,
         gamemission: GameMission::Doom2 as i32,
