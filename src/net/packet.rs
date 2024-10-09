@@ -174,10 +174,6 @@ impl Packet {
         }
     }
 
-    pub fn reset(&mut self) {
-        self.pos = 0;
-    }
-
     pub fn read_protocol(&mut self) -> Protocol {
         if let Some(name) = self.read_string() {
             match name.as_str() {
@@ -189,29 +185,13 @@ impl Packet {
         }
     }
 
-    pub fn write_protocol_list(&mut self) {
-        self.write_u8(1); // Number of protocols
-        self.write_string("CHOCOLATE_DOOM_0");
-    }
-
     pub fn write_protocol(&mut self, protocol: Protocol) {
         let name = match protocol {
             Protocol::ChocolateDoom0 => "CHOCOLATE_DOOM_0",
             _ => panic!("NET_WriteProtocol: Unknown protocol {:?}", protocol),
         };
+        self.write_u8(1); // Number of protocols
         self.write_string(name);
-    }
-
-    pub fn write_connect_data(&mut self, data: &ConnectData) {
-        self.write_u8(data.gamemode as u8);
-        self.write_u8(data.gamemission as u8);
-        self.write_u8(data.lowres_turn as u8);
-        self.write_u8(data.drone as u8);
-        self.write_u8(data.max_players as u8);
-        self.write_u8(data.is_freedoom as u8);
-        self.write_blob(&data.wad_sha1sum);
-        self.write_blob(&data.deh_sha1sum);
-        self.write_u8(data.player_class as u8);
     }
 
     pub fn read_wait_data(&mut self) -> Option<WaitData> {
@@ -273,29 +253,6 @@ impl Packet {
             settings.player_classes[i] = self.read_u8()? as i32;
         }
         Some(settings)
-    }
-
-    pub fn write_settings(&mut self, settings: &GameSettings) {
-        self.write_u8(settings.ticdup as u8);
-        self.write_u8(settings.extratics as u8);
-        self.write_u8(settings.deathmatch as u8);
-        self.write_u8(settings.nomonsters as u8);
-        self.write_u8(settings.fast_monsters as u8);
-        self.write_u8(settings.respawn_monsters as u8);
-        self.write_u8(settings.episode as u8);
-        self.write_u8(settings.map as u8);
-        self.write_i8(settings.skill as i8);
-        self.write_u8(settings.gameversion as u8);
-        self.write_u8(settings.lowres_turn as u8);
-        self.write_u8(settings.new_sync as u8);
-        self.write_u32(settings.timelimit);
-        self.write_i8(settings.loadgame as i8);
-        self.write_u8(settings.random as u8);
-        self.write_u8(settings.num_players as u8);
-        self.write_i8(settings.consoleplayer as i8);
-        for i in 0..settings.num_players as usize {
-            self.write_u8(settings.player_classes[i] as u8);
-        }
     }
 
     pub fn read_full_ticcmd(&mut self, lowres_turn: bool) -> Option<FullTicCmd> {

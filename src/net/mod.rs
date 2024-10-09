@@ -1,11 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
-pub const MAXNETNODES: usize = 16;
 pub const NET_MAXPLAYERS: usize = 8;
 pub const MAXPLAYERNAME: usize = 30;
 pub const BACKUPTICS: usize = 128;
-pub const NET_RELIABLE_PACKET: u16 = 1 << 15;
 
 pub const NET_TICDIFF_FORWARD: u32 = 1 << 0;
 pub const NET_TICDIFF_SIDE: u32 = 1 << 1;
@@ -277,11 +275,4 @@ impl Default for ServerSend {
             cmd: Default::default(),
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct ReliablePacket {
-    pub packet: packet::Packet,
-    pub seq: u8,
-    pub last_send_time: Instant,
 }

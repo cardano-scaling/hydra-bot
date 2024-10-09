@@ -103,9 +103,9 @@
             run-server
             rust
 
+            cargo-watch
             chocolate-doom
             python312Packages.virtualenvwrapper
-            tshark
           ];
         };
       }

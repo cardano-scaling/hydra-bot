@@ -1,13 +1,12 @@
 use rand::prelude::*;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use std::{io, thread};
 use tracing::{debug, error, info, warn};
 
 use super::packet::Packet;
-use super::{NET_RELIABLE_PACKET, *};
+use super::*;
 
-const NET_MAGIC_NUMBER: u32 = 1454104972;
 const KEEPALIVE_PERIOD: Duration = Duration::from_secs(1);
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_RETRIES: u32 = 10;
@@ -56,9 +55,6 @@ pub struct Client {
     max_players: i32,
     is_freedoom: i32,
     player_class: i32,
-    reliable_packets: Vec<ReliablePacket>,
-    reliable_send_seq: u8,
-    reliable_recv_seq: u8,
     pid_controller: PIDController,
 }
 
@@ -133,9 +129,6 @@ impl Client {
             max_players: 0,
             is_freedoom: 0,
             player_class: 0,
-            reliable_packets: Vec::new(),
-            reliable_send_seq: 0,
-            reliable_recv_seq: 0,
             pid_controller: PIDController::new(0.1, 0.01, 0.02),
         })
     }
@@ -381,14 +374,6 @@ impl Client {
         }
     }
 
-    fn send_waiting_data_response(&mut self) {
-        let mut packet = Packet::new();
-        packet.write_u16(PacketType::WaitingData.to_u16());
-        packet.write_string(&self.player_name);
-        self.send_packet(&packet);
-        info!("Waiting data response sent to server");
-    }
-
     fn validate_wait_data(&self, wait_data: &WaitData) -> bool {
         wait_data.num_players <= wait_data.max_players
             && wait_data.ready_players <= wait_data.num_players
@@ -441,13 +426,6 @@ impl Client {
                 self.send_ack(packet);
             }
         }
-    }
-
-    fn send_game_start_response(&mut self) {
-        let mut packet = Packet::new();
-        packet.write_u16(PacketType::GameStart.to_u16());
-        self.send_packet(&packet);
-        info!("Game start response sent to server");
     }
 
     fn validate_game_settings(&self, settings: &GameSettings) -> bool {
@@ -907,19 +885,6 @@ impl Client {
         self.settings
     }
 
-    pub fn launch_game(&mut self) {
-        let packet = self.new_reliable_packet(PacketType::Launch);
-        self.send_packet(&packet);
-    }
-
-    pub fn start_game(&mut self, settings: &GameSettings) {
-        self.last_ticcmd = TicCmd::default();
-
-        let mut packet = self.new_reliable_packet(PacketType::GameStart);
-        packet.write_settings(settings);
-        self.send_packet(&packet);
-    }
-
     fn send_packet(&self, packet: &Packet) {
         if let Some(server_addr) = self.server_addr {
             if let Err(e) = self.socket.send_to(&packet.data, server_addr) {
@@ -1043,8 +1008,6 @@ impl Client {
         packet.write_u32(data_length as u32);
 
         // 7. Connect Data
-        // Game Parameters
-        // 7. Connect Data
         packet.write_u8(connect_data.gamemode as u8);
         packet.write_u8(connect_data.gamemission as u8);
         packet.write_u8(connect_data.lowres_turn as u8);
@@ -1082,31 +1045,5 @@ impl Client {
 
     pub fn is_connected(&self) -> bool {
         self.net_client_connected
-    }
-
-    fn new_reliable_packet(&mut self, packet_type: PacketType) -> Packet {
-        let mut packet = Packet::new();
-        packet.write_u16(packet_type.to_u16() | NET_RELIABLE_PACKET);
-        packet.write_u8(self.reliable_send_seq);
-
-        self.reliable_packets.push(ReliablePacket {
-            packet: packet.clone(),
-            seq: self.reliable_send_seq,
-            last_send_time: Instant::now(),
-        });
-        self.reliable_send_seq = self.reliable_send_seq.wrapping_add(1);
-
-        packet
-    }
-
-    pub fn request_launch(&mut self) {
-        if self.state == ClientState::WaitingLaunch {
-            let mut packet = Packet::new();
-            packet.write_u16(PacketType::Launch.to_u16() | NET_RELIABLE_PACKET);
-            packet.write_u8(self.reliable_send_seq);
-            self.send_packet(&packet);
-            debug!("Sent launch request: {:x?}", packet.data);
-            self.reliable_send_seq = self.reliable_send_seq.wrapping_add(1);
-        }
     }
 }

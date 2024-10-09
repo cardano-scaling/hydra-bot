@@ -14,7 +14,6 @@ struct TiccmdSet {
 }
 
 pub struct Game {
-    instance_uid: u32,
     ticdata: [TiccmdSet; BACKUPTICS],
     maketic: i32,
     recvtic: i32,
@@ -25,7 +24,6 @@ pub struct Game {
     new_sync: bool,
     local_playeringame: [bool; NET_MAXPLAYERS],
     frameskip: [bool; 4],
-    drone: bool,
     singletics: bool,
     lasttime: i32,
     skiptics: i32,
@@ -37,11 +35,7 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Self {
-        let uid = rand::random::<u32>() % 0xfffe;
-        debug!("doom: 8, uid is {}", uid);
-
         Game {
-            instance_uid: uid,
             ticdata: [TiccmdSet {
                 cmds: [TicCmd::default(); NET_MAXPLAYERS],
                 ingame: [false; NET_MAXPLAYERS],
@@ -55,7 +49,6 @@ impl Game {
             new_sync: true,
             local_playeringame: [false; NET_MAXPLAYERS],
             frameskip: [false; 4],
-            drone: false,
             singletics: false,
             lasttime: 0,
             skiptics: 0,
@@ -81,10 +74,6 @@ impl Game {
 
     fn build_new_tic(&mut self, client: &mut Client) -> bool {
         let gameticdiv = self.maketic / self.ticdup;
-
-        if client.is_drone() {
-            return false;
-        }
 
         if self.new_sync {
             if !client.is_connected() && self.maketic - gameticdiv > 2 {
