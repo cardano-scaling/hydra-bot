@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
+pub const NET_MAGIC_NUMBER: u32 = 0x6abe18c4;
 pub const NET_MAXPLAYERS: usize = 8;
 pub const MAXPLAYERNAME: usize = 30;
 pub const BACKUPTICS: usize = 128;
@@ -33,15 +34,15 @@ pub struct TicCmd {
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct ConnectData {
-    pub gamemode: i32,
-    pub gamemission: i32,
-    pub lowres_turn: i32,
-    pub drone: i32,
-    pub max_players: i32,
-    pub is_freedoom: i32,
+    pub gamemode: u8,
+    pub gamemission: u8,
+    pub lowres_turn: u8,
+    pub drone: u8,
+    pub max_players: u8,
+    pub is_freedoom: u8,
     pub wad_sha1sum: [u8; 20],
     pub deh_sha1sum: [u8; 20],
-    pub player_class: i32,
+    pub player_class: u8,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
@@ -49,10 +50,10 @@ pub struct GameSettings {
     pub ticdup: i32,
     pub extratics: i32,
     pub deathmatch: i32,
-    pub episode: i32,
     pub nomonsters: i32,
     pub fast_monsters: i32,
     pub respawn_monsters: i32,
+    pub episode: i32,
     pub map: i32,
     pub skill: i32,
     pub gameversion: i32,

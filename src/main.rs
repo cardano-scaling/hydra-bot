@@ -14,7 +14,7 @@ mod net;
 
 use self::game::Game;
 use self::net::client::Client;
-use self::net::{ConnectData, GameMission, GameMode};
+use self::net::ConnectData;
 
 #[derive(FromArgs)]
 /// An AI player implementation compatible with Chocolate Doom v3.
@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Args = argh::from_env();
 
     info!("Initializing client");
-    let mut client = Client::new("HydraBot".to_string(), true)?;
+    let mut client = Client::new("HydraBot".to_string(), false)?;
     client.init();
 
     info!("Initializing game");
@@ -54,15 +54,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let connect_data = ConnectData {
-        gamemode: GameMode::Commercial as i32,
-        gamemission: GameMission::Doom as i32,
+        gamemode: 1,
+        gamemission: 0,
         lowres_turn: 0,
-        drone: 1,
-        max_players: 8,
+        drone: 0,
+        max_players: 4,
         is_freedoom: 0,
         wad_sha1sum: wad_sha1.into(),
         deh_sha1sum: [0; 20],
-        player_class: 0,
+        player_class: 0x16,
     };
 
     info!("Connecting with data: {:?}", connect_data);

@@ -1,4 +1,5 @@
 use rand::prelude::*;
+use rand::Rng;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant};
 use std::{io, thread};
@@ -7,9 +8,9 @@ use tracing::{debug, error, info, warn};
 use super::packet::Packet;
 use super::*;
 
+const PACKAGE_STRING: &str = "Chocolate Doom 3.0.1";
 const KEEPALIVE_PERIOD: Duration = Duration::from_secs(1);
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
-const MAX_RETRIES: u32 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ClientState {
@@ -20,6 +21,35 @@ enum ClientState {
     WaitingStart,
     InGame,
     Disconnecting,
+}
+
+struct PIDController {
+    kp: f32,
+    ki: f32,
+    kd: f32,
+    integral: i32,
+    previous_error: i32,
+}
+
+impl PIDController {
+    fn new(kp: f32, ki: f32, kd: f32) -> Self {
+        PIDController {
+            kp,
+            ki,
+            kd,
+            integral: 0,
+            previous_error: 0,
+        }
+    }
+
+    fn update(&mut self, error: i32) -> i32 {
+        let p = self.kp * error as f32;
+        self.integral += error;
+        let i = self.ki * self.integral as f32;
+        let d = self.kd * (error - self.previous_error) as f32;
+        self.previous_error = error;
+        (p + i + d) as i32
+    }
 }
 
 pub struct Client {
@@ -36,9 +66,6 @@ pub struct Client {
     need_acknowledge: bool,
     gamedata_recv_time: Instant,
     last_latency: i32,
-    net_local_wad_sha1sum: [u8; 20],
-    net_local_deh_sha1sum: [u8; 20],
-    net_local_is_freedoom: bool,
     net_waiting_for_launch: bool,
     net_client_connected: bool,
     net_client_received_wait_data: bool,
@@ -47,44 +74,14 @@ pub struct Client {
     last_ticcmd: TicCmd,
     recvwindow_cmd_base: [TicCmd; NET_MAXPLAYERS],
     start_time: Instant,
-    num_retries: u32,
     protocol: Protocol,
-    gamemode: i32,
-    gamemission: i32,
-    lowres_turn: i32,
-    max_players: i32,
-    is_freedoom: i32,
-    player_class: i32,
+    is_freedoom: u8,
     pid_controller: PIDController,
-}
-
-struct PIDController {
-    kp: f32,
-    ki: f32,
-    kd: f32,
-    cumul_error: i32,
-    last_error: i32,
-}
-
-impl PIDController {
-    fn new(kp: f32, ki: f32, kd: f32) -> Self {
-        PIDController {
-            kp,
-            ki,
-            kd,
-            cumul_error: 0,
-            last_error: 0,
-        }
-    }
-
-    fn update(&mut self, error: i32) -> i32 {
-        self.cumul_error += error;
-        let d_error = error - self.last_error;
-        self.last_error = error;
-
-        (self.kp * error as f32 - self.ki * self.cumul_error as f32 + self.kd * d_error as f32)
-            as i32
-    }
+    game_time_offset: i32,
+    gametic: i32,
+    last_gamedata_time: Instant,
+    reliable_packets: std::collections::HashMap<u32, Packet>,
+    next_reliable_seq: u32,
 }
 
 impl Client {
@@ -110,9 +107,6 @@ impl Client {
             need_acknowledge: false,
             gamedata_recv_time: Instant::now(),
             last_latency: 0,
-            net_local_wad_sha1sum: [0; 20],
-            net_local_deh_sha1sum: [0; 20],
-            net_local_is_freedoom: false,
             net_waiting_for_launch: false,
             net_client_connected: false,
             net_client_received_wait_data: false,
@@ -120,16 +114,15 @@ impl Client {
             last_send_time: Instant::now(),
             last_ticcmd: TicCmd::default(),
             recvwindow_cmd_base: [TicCmd::default(); NET_MAXPLAYERS],
-            num_retries: 0,
             start_time: Instant::now(),
             protocol: Protocol::ChocolateDoom0,
-            gamemode: 0,
-            gamemission: 0,
-            lowres_turn: 0,
-            max_players: 0,
             is_freedoom: 0,
-            player_class: 0,
-            pid_controller: PIDController::new(0.1, 0.01, 0.02),
+            pid_controller: PIDController::new(0.1, 0.001, 0.05),
+            game_time_offset: 0,
+            gametic: 0,
+            last_gamedata_time: Instant::now(),
+            reliable_packets: std::collections::HashMap::new(),
+            next_reliable_seq: 0,
         })
     }
 
@@ -146,14 +139,13 @@ impl Client {
 
         if self.player_name.is_empty() {
             self.player_name = Self::get_player_name();
+            debug!("Processing resend request");
+            debug!("Player name set to: {}", self.player_name);
         }
-        debug!("Player name set to: {}", self.player_name);
     }
 
     fn init_bot(&mut self) {
-        if self.drone {
-            debug!("Initializing bot-specific settings");
-        }
+        // Bot initialization logic here
     }
 
     fn get_player_name() -> String {
@@ -173,6 +165,12 @@ impl Client {
     pub fn run(&mut self) {
         self.run_bot();
         self.receive_packets();
+        self.handle_state();
+
+        // Send game data acknowledgment if needed
+        if self.need_acknowledge {
+            self.send_game_data_ack();
+        }
         self.handle_state();
         self.send_keepalive();
         self.check_resends();
@@ -194,10 +192,11 @@ impl Client {
     fn handle_state(&mut self) {
         match self.state {
             ClientState::Connecting => self.handle_connecting(),
-            ClientState::Connected | ClientState::WaitingLaunch => self.handle_waiting(),
+            ClientState::WaitingLaunch => self.handle_waiting_launch(),
+            ClientState::WaitingStart => self.handle_waiting_start(),
             ClientState::InGame => self.handle_in_game(),
             ClientState::Disconnecting => self.handle_disconnecting(),
-            _ => debug!("Current state: {:?}", self.state),
+            _ => {}
         }
     }
 
@@ -209,13 +208,25 @@ impl Client {
         }
     }
 
-    fn handle_waiting(&mut self) {
+    fn handle_waiting_launch(&mut self) {
+        // Send waiting data requests, manage timeouts, etc.
         self.net_waiting_for_launch = true;
         debug!("Waiting for launch");
     }
 
+    fn handle_waiting_start(&mut self) {
+        let settings_clone = self.settings.clone();
+        if let Some(settings) = settings_clone {
+            self.send_game_start(&settings);
+        }
+    }
+
     fn handle_in_game(&mut self) {
+        // Regular in-game processing
         self.advance_window();
+        let last_ticcmd = self.last_ticcmd;
+        let gametic = self.gametic;
+        self.send_ticcmd(&last_ticcmd, gametic as u32);
     }
 
     fn handle_disconnecting(&mut self) {
@@ -227,8 +238,17 @@ impl Client {
     fn handle_connection_timeout(&mut self) {
         warn!("Connection attempt timed out");
         self.reject_reason = Some("Connection attempt timed out".to_string());
-        self.state = ClientState::Disconnected;
+        info!("Disconnected from server");
+
+        // Notify game logic of disconnection
+        self.notify_disconnection();
+
+        // Clean up resources
         self.shutdown();
+    }
+
+    fn notify_disconnection(&mut self) {
+        // Implement disconnection notification logic
     }
 
     fn handle_disconnection_timeout(&mut self) {
@@ -256,27 +276,22 @@ impl Client {
 
     fn parse_packet(&mut self, packet: &mut Packet) {
         let original_data = packet.data.clone();
-        if let Some(packet_type) = packet.read_u16().and_then(PacketType::from_u16) {
-            debug!(
-                "Received packet: type={:?}, data={:x?}",
-                packet_type, original_data
-            );
-            match packet_type {
-                PacketType::Syn => self.parse_syn(packet),
-                PacketType::Rejected => self.parse_reject(packet),
-                PacketType::WaitingData => self.parse_waiting_data(packet),
-                PacketType::Launch => self.parse_launch(packet),
-                PacketType::GameStart => self.parse_game_start(packet),
-                PacketType::GameData => self.parse_game_data(packet),
-                PacketType::GameDataResend => self.parse_resend_request(packet),
-                PacketType::ConsoleMessage => self.parse_console_message(packet),
-                PacketType::Disconnect => self.parse_disconnect(packet),
-                PacketType::DisconnectAck => self.parse_disconnect_ack(packet),
-                PacketType::KeepAlive => debug!("Received keep-alive packet"),
-                _ => warn!("Unhandled packet type: {:?}", packet_type),
-            }
-        } else {
-            warn!("Unknown packet type: {:x?}", original_data);
+        let packet_type = packet.read_u16().and_then(PacketType::from_u16);
+
+        match packet_type {
+            Some(PacketType::Syn) => self.parse_syn(packet),
+            Some(PacketType::Ack) => self.parse_ack(packet),
+            Some(PacketType::Rejected) => self.parse_reject(packet),
+            Some(PacketType::WaitingData) => self.parse_waiting_data(packet),
+            Some(PacketType::Launch) => self.parse_launch(packet),
+            Some(PacketType::GameStart) => self.parse_game_start(packet),
+            Some(PacketType::GameData) => self.parse_game_data(packet),
+            Some(PacketType::GameDataResend) => self.parse_resend_request(packet),
+            Some(PacketType::ConsoleMessage) => self.parse_console_message(packet),
+            Some(PacketType::Disconnect) => self.parse_disconnect(packet),
+            Some(PacketType::DisconnectAck) => self.parse_disconnect_ack(packet),
+            Some(PacketType::KeepAlive) => debug!("Received keep-alive packet"),
+            _ => warn!("Unknown packet type: {:x?}", original_data),
         }
     }
 
@@ -297,43 +312,59 @@ impl Client {
 
     fn parse_syn(&mut self, packet: &mut Packet) {
         debug!("Processing SYN response");
-        let server_version = packet.read_safe_string().unwrap_or_default();
-        debug!("Server version: {}", server_version);
 
-        if let Some(protocol) = self.negotiate_protocol(packet) {
-            self.protocol = protocol;
-            info!("Connected to server");
-            self.state = ClientState::Connected;
-
-            // Send an ACK packet in response to the SYN
-            self.send_ack(packet);
-
-            if server_version != env!("CARGO_PKG_VERSION") {
-                warn!(
-                    "Version mismatch: Client is '{}', but the server is '{}'. \
-                    This mismatch may cause the game to desynchronize.",
-                    env!("CARGO_PKG_VERSION"),
-                    server_version
-                );
+        if let Some(magic) = packet.read_u32() {
+            if magic != NET_MAGIC_NUMBER {
+                error!("Incorrect magic number in SYN packet");
+                return;
             }
         } else {
-            error!("No common protocol");
-            self.reject_reason = Some("No common protocol".to_string());
+            error!("Failed to read magic number from SYN packet");
+            return;
+        }
+
+        if let Some(server_version) = packet.read_safe_string() {
+            debug!("Server version: {}", server_version);
+
+            if let Some(protocol) = self.negotiate_protocol(packet) {
+                self.protocol = protocol;
+                info!("Negotiated protocol: {:?}", protocol);
+
+                // Set the connection state to CONNECTED
+                self.state = ClientState::Connected;
+
+                // Send an ACK packet in response to the SYN
+                self.send_ack();
+
+                // Check for version mismatch
+                if server_version != PACKAGE_STRING {
+                    warn!(
+                        "Version mismatch: Client is '{}', but the server is '{}'. \
+                        It is possible that this mismatch may cause the game to desync.",
+                        PACKAGE_STRING, server_version
+                    );
+                }
+            } else {
+                error!("Failed to negotiate a common protocol");
+                self.reject_reason = Some("No common protocol".to_string());
+            }
+        } else {
+            error!("Failed to read server version");
+            self.reject_reason = Some("Failed to read server version".to_string());
         }
     }
 
-    fn send_ack(&mut self, packet: &mut Packet) {
-        packet.write_u16(PacketType::Ack.to_u16());
-        packet.write_protocol(self.protocol);
-        self.send_packet(&packet);
+    fn send_ack(&mut self) {
+        let mut ack_packet = Packet::new();
+        ack_packet.write_u16(PacketType::Ack.to_u16());
+        ack_packet.write_protocol(self.protocol);
+        self.send_packet(&ack_packet);
         info!("ACK sent to server");
     }
 
     fn negotiate_protocol(&self, packet: &mut Packet) -> Option<Protocol> {
-        let num_protocols = packet.read_u8().unwrap_or(0);
-        for _ in 0..num_protocols {
-            let protocol = packet.read_protocol();
-            if protocol == Protocol::ChocolateDoom0 {
+        if let Some(protocol) = packet.read_protocol() {
+            if protocol != Protocol::Unknown {
                 return Some(protocol);
             }
         }
@@ -351,10 +382,10 @@ impl Client {
         }
     }
 
-    fn send_disconnect_ack(&self, packet: &mut Packet) {
+    fn send_disconnect_ack(&mut self, packet: &mut Packet) {
         packet.write_u16(PacketType::DisconnectAck.to_u16());
         packet.write_u32(0x80);
-        self.send_packet(&packet);
+        self.send_packet(packet);
     }
 
     fn parse_waiting_data(&mut self, packet: &mut Packet) {
@@ -365,11 +396,9 @@ impl Client {
 
                 debug!("Received waiting data: {:?}", self.net_client_wait_data);
 
-                self.max_players = self.net_client_wait_data.max_players;
-                self.is_freedoom = self.net_client_wait_data.is_freedoom;
+                self.is_freedoom = self.net_client_wait_data.is_freedoom as u8;
 
-                // Send an ACK in response to waiting data
-                self.send_ack(packet);
+                self.send_ack();
             }
         }
     }
@@ -413,29 +442,29 @@ impl Client {
         debug!("Processing game start packet");
 
         if let Some(settings) = packet.read_settings() {
-            if self.validate_game_settings(&settings) {
-                info!("Initiating game state with settings: {:?}", settings);
-                self.state = ClientState::InGame;
-                self.settings = Some(settings);
-                self.init_game_state();
-
-                self.lowres_turn = settings.lowres_turn;
-                self.player_class = settings.player_classes[settings.consoleplayer as usize];
-
-                // Send an ACK in response to game start
-                self.send_ack(packet);
+            if settings.num_players > NET_MAXPLAYERS as i32
+                || settings.consoleplayer >= settings.num_players
+            {
+                error!("Invalid game settings received: {:?}", settings);
+                return;
             }
+
+            if (self.drone && settings.consoleplayer >= 0)
+                || (!self.drone && settings.consoleplayer < 0)
+            {
+                error!("Mismatch in drone status and consoleplayer");
+                return;
+            }
+
+            self.settings = Some(settings);
+            self.state = ClientState::InGame;
+            self.initialize_game_state();
+        } else {
+            error!("Failed to read game settings from GameStart packet");
         }
     }
 
-    fn validate_game_settings(&self, settings: &GameSettings) -> bool {
-        settings.num_players <= NET_MAXPLAYERS as i32
-            && (settings.consoleplayer as usize) < settings.num_players as usize
-            && ((self.drone && settings.consoleplayer < 0)
-                || (!self.drone && settings.consoleplayer >= 0))
-    }
-
-    fn init_game_state(&mut self) {
+    fn initialize_game_state(&mut self) {
         self.recv_window_start = 0;
         self.recv_window = [ServerRecv::default(); BACKUPTICS];
         self.send_queue = [ServerSend::default(); BACKUPTICS];
@@ -443,8 +472,11 @@ impl Client {
 
     fn parse_game_data(&mut self, packet: &mut Packet) {
         debug!("Processing game data packet");
-        if let (Some(seq), Some(num_tics)) = (packet.read_u8(), packet.read_u8()) {
-            let seq = self.expand_tic_num(seq as u32);
+        if let (Some(seq_byte), Some(num_tics)) = (packet.read_u8(), packet.read_u8()) {
+            // Set need_to_acknowledge to true
+            self.need_acknowledge = true;
+            self.last_gamedata_time = Instant::now();
+            let seq = self.expand_tic_num(seq_byte as u32);
             debug!("Game data received, seq={}, num_tics={}", seq, num_tics);
 
             let lowres_turn = self.settings.as_ref().map_or(false, |s| s.lowres_turn != 0);
@@ -458,9 +490,9 @@ impl Client {
             self.need_acknowledge = true;
             self.gamedata_recv_time = Instant::now();
             self.check_for_missing_tics(seq);
-
-            // Send an immediate ACK for the game data
-            self.send_game_data_ack();
+        } else {
+            error!("Failed to read sequence number or number of tics");
+            return;
         }
     }
 
@@ -471,6 +503,8 @@ impl Client {
             self.recv_window[index].cmd = cmd;
             debug!("Stored tic {} in receive window", seq);
             self.update_clock_sync(seq, cmd.latency);
+        } else {
+            warn!("Received tic {} is outside of receive window", seq);
         }
     }
 
@@ -492,11 +526,6 @@ impl Client {
 
     fn parse_resend_request(&mut self, packet: &mut Packet) {
         debug!("Processing resend request");
-        if self.drone {
-            warn!("Error: Resend request but we are a drone");
-            return;
-        }
-
         if let (Some(start), Some(num_tics)) = (packet.read_i32(), packet.read_u8()) {
             let end = start + num_tics as i32 - 1;
             debug!("Resend request: start={}, num_tics={}", start, num_tics);
@@ -556,23 +585,6 @@ impl Client {
         result
     }
 
-    fn update_clock_sync(&mut self, seq: u32, remote_latency: i32) {
-        let latency = self.send_queue[seq as usize % BACKUPTICS]
-            .time
-            .elapsed()
-            .as_millis() as i32;
-        let error = latency - remote_latency;
-
-        let offset_ms = self.pid_controller.update(error);
-
-        self.last_latency = latency;
-
-        debug!(
-            "Latency {}, remote {}, offset={}ms",
-            latency, remote_latency, offset_ms
-        );
-    }
-
     fn send_resend_request(&mut self, start: u32, end: u32) {
         let mut packet = Packet::new();
         packet.write_u16(PacketType::GameDataResend.to_u16());
@@ -625,8 +637,19 @@ impl Client {
     }
 
     pub fn send_ticcmd(&mut self, ticcmd: &TicCmd, maketic: u32) {
+        // Only build a new ticcmd every ticdup tics
+        if maketic % self.settings.as_ref().map_or(1, |s| s.ticdup as u32) != 0 {
+            // Use the previous ticcmd
+            return;
+        }
+
         let mut diff = TicDiff::default();
         self.calculate_ticcmd_diff(ticcmd, &mut diff);
+
+        // Drones do not send ticcmds to the server.
+        if self.drone {
+            return;
+        }
 
         let sendobj = &mut self.send_queue[maketic as usize % BACKUPTICS];
         sendobj.active = true;
@@ -634,13 +657,9 @@ impl Client {
         sendobj.time = Instant::now();
         sendobj.cmd = diff;
 
-        let starttic = self.settings.as_ref().map_or(0, |s| {
-            if maketic < s.extratics as u32 {
-                0
-            } else {
-                maketic - s.extratics as u32
-            }
-        });
+        // Only send tics up to maketic - extratics
+        let starttic =
+            maketic.saturating_sub(self.settings.as_ref().map_or(0, |s| s.extratics as u32));
         let endtic = maketic;
 
         self.send_tics(starttic, endtic);
@@ -690,7 +709,8 @@ impl Client {
             let window = self.recv_window[0].cmd;
             self.expand_full_ticcmd(&window, window_start, &mut ticcmds);
 
-            self.receive_tic(&ticcmds, &self.recv_window[0].cmd.playeringame);
+            let playeringame = self.recv_window[0].cmd.playeringame;
+            self.receive_tic(&ticcmds, &playeringame);
 
             self.recv_window.rotate_left(1);
             self.recv_window[BACKUPTICS - 1] = ServerRecv::default();
@@ -769,19 +789,49 @@ impl Client {
     }
 
     fn receive_tic(
-        &self,
-        _ticcmds: &[TicCmd; NET_MAXPLAYERS],
+        &mut self,
+        ticcmds: &[TicCmd; NET_MAXPLAYERS],
         playeringame: &[bool; NET_MAXPLAYERS],
     ) {
-        // TODO: Implement this.
+        // This is analogous to D_ReceiveTic in the C code
+        for (i, (&cmd, &ingame)) in ticcmds.iter().zip(playeringame.iter()).enumerate() {
+            if ingame {
+                // Store the received ticcmd for this player
+                self.recvwindow_cmd_base[i] = cmd;
+            }
+        }
+
+        // Advance the game tic
+        // This would typically be handled by the game logic, but we'll increment it here for now
+        self.gametic += 1;
+
         debug!(
-            "Received tic data for {} players",
-            playeringame.iter().filter(|&&p| p).count()
+            "Received tic {}, player states: {:?}",
+            self.gametic, playeringame
         );
     }
 
     fn check_resends(&mut self) {
         let now = Instant::now();
+        let deadlock_timeout = Duration::from_secs(1);
+
+        if now.duration_since(self.last_gamedata_time) > deadlock_timeout {
+            // Deadlock prevention logic
+            for i in 0..BACKUPTICS {
+                let recvobj = &mut self.recv_window[i];
+
+                if !recvobj.active && recvobj.resend_time == Instant::now() {
+                    // Send resend request for missing tic
+                    let start = self.recv_window_start + i as u32;
+                    let end = start + 5; // Request 5 tics
+
+                    self.send_resend_request(start, end);
+                    self.last_gamedata_time = now;
+                    break;
+                }
+            }
+        }
+
         let mut resend_start = -1;
         let mut resend_end = -1;
         let maybe_deadlocked = now.duration_since(self.gamedata_recv_time) > Duration::from_secs(1);
@@ -842,40 +892,22 @@ impl Client {
     }
 
     fn run_bot(&mut self) {
-        if self.state == ClientState::InGame && self.drone {
-            let maketic = self.recv_window_start + BACKUPTICS as u32;
+        if self.state == ClientState::InGame {
+            let maketic = self.gametic; // Use gametic as maketic
             let mut bot_ticcmd = TicCmd::default();
             self.generate_bot_ticcmd(&mut bot_ticcmd);
-            self.send_ticcmd(&bot_ticcmd, maketic);
+            self.send_ticcmd(&bot_ticcmd, maketic as u32);
         }
     }
 
-    fn generate_bot_ticcmd(&self, ticcmd: &mut TicCmd) {
-        // TODO: Implement more sophisticated bot AI logic
-        ticcmd.forwardmove = 50;
-        ticcmd.sidemove = 0;
-        ticcmd.angleturn = 0;
-    }
-
-    pub fn disconnect(&mut self) {
-        if !self.net_client_connected {
-            return;
-        }
-
-        info!("Beginning disconnect");
-        self.state = ClientState::Disconnecting;
-        self.start_time = Instant::now();
-
-        // Send disconnect packet five times
-        for _ in 0..5 {
-            let mut packet = Packet::new();
-            packet.write_u16(PacketType::Disconnect.to_u16());
-            self.send_packet(&packet);
-        }
-
-        self.state = ClientState::Disconnected;
-        self.shutdown();
-        info!("Disconnect complete");
+    fn generate_bot_ticcmd(&self, cmd: &mut TicCmd) {
+        // Implement bot AI logic here
+        // This is a placeholder implementation
+        let mut rng = rand::thread_rng();
+        cmd.forwardmove = rng.gen_range(-50..50);
+        cmd.sidemove = rng.gen_range(-50..50);
+        cmd.angleturn = rng.gen_range(-1024..1024);
+        cmd.buttons = if rng.gen_bool(0.1) { 1 } else { 0 };
     }
 
     pub fn get_settings(&self) -> Option<GameSettings> {
@@ -885,7 +917,22 @@ impl Client {
         self.settings
     }
 
-    fn send_packet(&self, packet: &Packet) {
+    fn send_packet(&mut self, packet: &Packet) {
+        // Check if the packet is reliable
+        let is_reliable = matches!(
+            PacketType::from_u16(u16::from_le_bytes([packet.data[0], packet.data[1]])),
+            Some(PacketType::Syn)
+                | Some(PacketType::Launch)
+                | Some(PacketType::GameStart)
+                | Some(PacketType::Disconnect)
+        );
+
+        if is_reliable {
+            // Store the packet for possible retransmission
+            self.reliable_packets
+                .insert(self.next_reliable_seq, packet.clone());
+            self.next_reliable_seq += 1;
+        }
         if let Some(server_addr) = self.server_addr {
             if let Err(e) = self.socket.send_to(&packet.data, server_addr) {
                 warn!("Failed to send packet: {}", e);
@@ -903,140 +950,112 @@ impl Client {
             .map_err(|e| format!("Failed to resolve address: {}", e))?
             .next()
             .ok_or_else(|| "No valid address found".to_string())?;
-        info!("Attempting to connect to server at {:?}", addr);
+
         self.server_addr = Some(addr);
-
         self.state = ClientState::Connecting;
-        self.reject_reason = Some("Unknown reason".to_string());
 
-        self.net_local_wad_sha1sum
-            .copy_from_slice(&connect_data.wad_sha1sum);
-        self.net_local_deh_sha1sum
-            .copy_from_slice(&connect_data.deh_sha1sum);
-        self.net_local_is_freedoom = connect_data.is_freedoom != 0;
-
-        self.gamemode = connect_data.gamemode;
-        self.gamemission = connect_data.gamemission;
-        self.lowres_turn = connect_data.lowres_turn;
-        self.max_players = connect_data.max_players;
-        self.is_freedoom = connect_data.is_freedoom;
-        self.player_class = connect_data.player_class;
-
-        self.net_client_connected = false;
-        self.net_client_received_wait_data = false;
-
-        self.start_time = Instant::now();
-        self.last_send_time = Instant::now() - KEEPALIVE_PERIOD;
-        self.num_retries = 0;
+        let start_time = Instant::now();
+        let mut last_send_time = Instant::now() - Duration::from_secs(1);
 
         while self.state == ClientState::Connecting {
-            if self.start_time.elapsed() > CONNECTION_TIMEOUT {
-                return Err(format!(
-                    "Connection timed out after {} seconds",
-                    CONNECTION_TIMEOUT.as_secs()
-                ));
+            let now = Instant::now();
+
+            if now.duration_since(start_time) > Duration::from_secs(5) {
+                return Err("Connection timed out".to_string());
             }
 
-            if self.num_retries >= MAX_RETRIES {
-                return Err(format!("Connection failed after {} retries", MAX_RETRIES));
+            if now.duration_since(last_send_time) >= Duration::from_secs(1) {
+                self.send_syn(&connect_data);
+                last_send_time = now;
             }
 
-            info!("Sending SYN packet, attempt {}", self.num_retries + 1);
-            self.send_syn(&connect_data);
+            self.run();
 
-            self.num_retries += 1;
-
-            for _ in 0..10 {
-                self.run();
-                let reject_reason = self.reject_reason.clone();
-
-                if self.state == ClientState::Connected {
-                    break;
-                } else if let Some(reject_reason) = reject_reason {
-                    self.disconnect();
-                    return Err(format!("Connection rejected: {}", reject_reason));
-                }
-
-                thread::sleep(Duration::from_millis(200));
-            }
-
-            if self.state == ClientState::Connected {
-                info!("Successfully connected");
-                self.reject_reason = None;
-                self.state = ClientState::WaitingLaunch;
-                self.drone = connect_data.drone != 0;
-                self.net_client_connected = true;
-                return Ok(());
-            }
-
-            info!(
-                "Connection attempt {} failed, retrying...",
-                self.num_retries
-            );
-            thread::sleep(Duration::from_secs(2));
+            thread::sleep(Duration::from_millis(1));
         }
 
-        Err(format!(
-            "Connection failed. Reason: {:?}",
-            self.reject_reason
-        ))
+        if self.state == ClientState::Connected {
+            Ok(())
+        } else {
+            Err(self
+                .reject_reason
+                .clone()
+                .unwrap_or_else(|| "Connection failed".to_string()))
+        }
     }
 
     fn send_syn(&mut self, connect_data: &ConnectData) {
         let mut packet = Packet::new();
 
-        // 1. Packet Type (SYN)
         packet.write_u16(PacketType::Syn.to_u16());
-
-        // 2. Random Challenge
-        packet.write_u32(rand::random());
-
-        // 3. Game Description
-        packet.write_string("Chocolate Doom 3.0.1");
-
-        // 4. Number of Protocols
-        packet.write_u8(1);
-
-        // 5. Protocol Identifier
-        packet.write_string("CHOCOLATE_DOOM_0");
-
-        // 6. Calculate Data Length
-        let player_name_len = self.player_name.len() + 1; // +1 for null terminator
-        let data_length = 6 + 20 + 20 + 1 + player_name_len; // Should be around 56 bytes
-
-        // Write Data Length in Little-Endian
-        packet.write_u32(data_length as u32);
-
-        // 7. Connect Data
-        packet.write_u8(connect_data.gamemode as u8);
-        packet.write_u8(connect_data.gamemission as u8);
-        packet.write_u8(connect_data.lowres_turn as u8);
-        packet.write_u8(connect_data.drone as u8);
-        packet.write_u8(connect_data.max_players as u8);
-        packet.write_u8(connect_data.is_freedoom as u8);
-        packet.write_blob(&connect_data.wad_sha1sum);
-        packet.write_blob(&connect_data.deh_sha1sum);
-        packet.write_u8(connect_data.player_class as u8);
+        packet.write_u32(NET_MAGIC_NUMBER);
+        packet.write_string(PACKAGE_STRING);
+        // Write a list of supported protocols (assuming only one protocol for now)
+        packet.write_u8(1); // Number of protocols
+        packet.write_protocol(self.protocol);
+        packet.write_connect_data(connect_data);
         packet.write_string(&self.player_name);
 
-        // Send the packet
         self.send_packet(&packet);
         info!("SYN sent to server: {} bytes", packet.data.len());
+        debug!("SYN packet data: {:x?}", packet.data);
     }
 
-    pub fn build_ticcmd(&mut self, cmd: &mut TicCmd, _maketic: u32) {
-        // TODO: Implement actual ticcmd building logic
-        *cmd = TicCmd::default();
+    pub fn build_ticcmd(&mut self, cmd: &mut TicCmd, maketic: u32) {
+        // This is analogous to G_BuildTiccmd in the C code
+
+        // For a bot, we'll implement some simple movement
+        let mut rng = rand::thread_rng();
+
+        cmd.forwardmove = rng.gen_range(-50..50);
+        cmd.sidemove = rng.gen_range(-50..50);
+        cmd.angleturn = rng.gen_range(-1024..1024);
+
+        // Randomly fire
+        if rng.gen_bool(0.1) {
+            cmd.buttons |= 1; // Assuming 1 is the fire button
+        }
+
+        // Set the consistancy value
+        cmd.consistancy = self.recvwindow_cmd_base[self
+            .settings
+            .as_ref()
+            .map_or(0, |s| s.consoleplayer as usize)]
+        .consistancy;
+
+        debug!("Built ticcmd for tic {}: {:?}", maketic, cmd);
     }
 
-    pub fn run_tic(&mut self, _cmds: &[TicCmd; NET_MAXPLAYERS], _ingame: &[bool; NET_MAXPLAYERS]) {
-        // TODO: Implement actual tic running logic
-        // Commented out for now to avoid unused variable warnings
-        // for (i, (cmd, &in_game)) in _cmds.iter().zip(_ingame.iter()).enumerate() {
-        //     if in_game {
-        //         debug!("Player {}: {:?}", i, cmd);
-        //     }
-        // }
+    pub fn run_tic(&mut self, cmds: &[TicCmd; NET_MAXPLAYERS], ingame: &[bool; NET_MAXPLAYERS]) {
+        // This is analogous to G_Ticker in the C code
+
+        // Update game state based on commands
+        for (i, (&cmd, &in_game)) in cmds.iter().zip(ingame.iter()).enumerate() {
+            if in_game {
+                // Apply the command for this player
+                self.apply_command(i, &cmd);
+            }
+        }
+
+        // Update game objects, AI, etc.
+        self.update_world();
+
+        debug!(
+            "Ran tic, applied commands for {} players",
+            ingame.iter().filter(|&&x| x).count()
+        );
+    }
+
+    fn apply_command(&mut self, player_num: usize, cmd: &TicCmd) {
+        // Apply the command to the player's game object
+        // This is a placeholder and should be expanded based on your game logic
+        debug!("Applied command for player {}: {:?}", player_num, cmd);
+    }
+
+    fn update_world(&mut self) {
+        // Update all game objects, run AI, etc.
+        // This is a placeholder and should be expanded based on your game logic
+        debug!("Updated world state");
     }
 
     pub fn is_drone(&self) -> bool {
@@ -1045,5 +1064,61 @@ impl Client {
 
     pub fn is_connected(&self) -> bool {
         self.net_client_connected
+    }
+
+    fn parse_ack(&mut self, packet: &mut Packet) {
+        debug!("Processing ACK response");
+        if self.state == ClientState::Connecting {
+            if let Some(server_version) = packet.read_safe_string() {
+                debug!("Server version: {}", server_version);
+                if let Some(protocol) = self.negotiate_protocol(packet) {
+                    self.protocol = protocol;
+                    info!("Connected to server using protocol: {:?}", protocol);
+                    self.state = ClientState::Connected;
+                } else {
+                    error!("No common protocol found during negotiation");
+                    self.reject_reason = Some("No common protocol".to_string());
+                }
+            } else {
+                error!("Failed to read server version");
+                self.reject_reason = Some("Failed to read server version".to_string());
+            }
+        }
+    }
+
+    fn send_game_start(&mut self, settings: &GameSettings) {
+        let mut packet = Packet::new();
+        packet.write_u16(PacketType::GameStart.to_u16());
+        packet.write_settings(settings);
+        self.send_packet(&packet);
+        info!("GameStart sent to server");
+    }
+
+    pub fn disconnect(&mut self) {
+        if self.state != ClientState::Disconnected {
+            self.state = ClientState::Disconnecting;
+            let mut packet = Packet::new();
+            packet.write_u16(PacketType::Disconnect.to_u16());
+            self.send_packet(&packet);
+            info!("Disconnect request sent to server");
+        }
+    }
+}
+impl Client {
+    fn update_clock_sync(&mut self, seq: u32, remote_latency: i32) {
+        let now = Instant::now();
+        let send_time = self.send_queue[seq as usize % BACKUPTICS].time;
+        let latency = now.duration_since(send_time).as_millis() as i32;
+
+        let error = latency - remote_latency;
+        let adjustment = self.pid_controller.update(error);
+        self.game_time_offset += adjustment;
+
+        self.last_latency = latency;
+
+        debug!(
+            "Clock sync: latency={}, remote_latency={}, error={}, adjustment={}, game_time_offset={}",
+            latency, remote_latency, error, adjustment, self.game_time_offset
+        );
     }
 }

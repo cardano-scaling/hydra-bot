@@ -25,7 +25,48 @@ impl Packet {
         self.data.extend_from_slice(&value.to_le_bytes());
     }
 
-    fn read_ticcmd_diff(&mut self, lowres_turn: bool) -> Option<TicDiff> {
+    pub fn write_connect_data(&mut self, data: &ConnectData) {
+        self.write_u8(data.gamemode as u8);
+        self.write_u8(data.gamemission as u8);
+        self.write_u8(data.lowres_turn as u8);
+        self.write_u8(data.drone as u8);
+        self.write_u8(data.max_players as u8);
+        self.write_u8(data.is_freedoom as u8);
+        self.write_blob(&data.wad_sha1sum);
+        self.write_blob(&data.deh_sha1sum);
+        self.write_u8(data.player_class as u8);
+    }
+
+    pub fn read_protocol(&mut self) -> Option<Protocol> {
+        self.read_string().and_then(|s| match s.as_str() {
+            "CHOCOLATE_DOOM_0" => Some(Protocol::ChocolateDoom0),
+            _ => None,
+        })
+    }
+
+    pub fn write_settings(&mut self, settings: &GameSettings) {
+        self.write_u8(settings.ticdup as u8);
+        self.write_u8(settings.extratics as u8);
+        self.write_u8(settings.deathmatch as u8);
+        self.write_u8(settings.nomonsters as u8);
+        self.write_u8(settings.fast_monsters as u8);
+        self.write_u8(settings.respawn_monsters as u8);
+        self.write_u8(settings.episode as u8);
+        self.write_u8(settings.map as u8);
+        self.write_i8(settings.skill as i8);
+        self.write_u8(settings.gameversion as u8);
+        self.write_u8(settings.lowres_turn as u8);
+        self.write_u8(settings.new_sync as u8);
+        self.write_u32(settings.timelimit);
+        self.write_i8(settings.loadgame as i8);
+        self.write_u8(settings.random as u8);
+        self.write_u8(settings.num_players as u8);
+        self.write_i8(settings.consoleplayer as i8);
+        for &player_class in &settings.player_classes {
+            self.write_u8(player_class as u8);
+        }
+    }
+    pub fn read_ticcmd_diff(&mut self, lowres_turn: bool) -> Option<TicDiff> {
         let mut diff = TicDiff {
             diff: self.read_u8()? as u32,
             ..Default::default()
@@ -174,17 +215,6 @@ impl Packet {
         }
     }
 
-    pub fn read_protocol(&mut self) -> Protocol {
-        if let Some(name) = self.read_string() {
-            match name.as_str() {
-                "CHOCOLATE_DOOM_0" => Protocol::ChocolateDoom0,
-                _ => Protocol::Unknown,
-            }
-        } else {
-            Protocol::Unknown
-        }
-    }
-
     pub fn write_protocol(&mut self, protocol: Protocol) {
         let name = match protocol {
             Protocol::ChocolateDoom0 => "CHOCOLATE_DOOM_0",
@@ -229,29 +259,30 @@ impl Packet {
     }
 
     pub fn read_settings(&mut self) -> Option<GameSettings> {
-        let mut settings = GameSettings {
-            ticdup: self.read_u8()? as i32,
-            extratics: self.read_u8()? as i32,
-            deathmatch: self.read_u8()? as i32,
-            nomonsters: self.read_u8()? as i32,
-            fast_monsters: self.read_u8()? as i32,
-            respawn_monsters: self.read_u8()? as i32,
-            episode: self.read_u8()? as i32,
-            map: self.read_u8()? as i32,
-            skill: self.read_i8()? as i32,
-            gameversion: self.read_u8()? as i32,
-            lowres_turn: self.read_u8()? as i32,
-            new_sync: self.read_u8()? as i32,
-            timelimit: self.read_u32()?,
-            loadgame: self.read_i8()? as i32,
-            random: self.read_u8()? as i32,
-            num_players: self.read_u8()? as i32,
-            consoleplayer: self.read_i8()? as i32,
-            ..Default::default()
-        };
-        for i in 0..settings.num_players as usize {
+        let mut settings = GameSettings::default();
+
+        settings.ticdup = self.read_u8()? as i32;
+        settings.extratics = self.read_u8()? as i32;
+        settings.deathmatch = self.read_u8()? as i32;
+        settings.nomonsters = self.read_u8()? as i32;
+        settings.fast_monsters = self.read_u8()? as i32;
+        settings.respawn_monsters = self.read_u8()? as i32;
+        settings.episode = self.read_u8()? as i32;
+        settings.map = self.read_u8()? as i32;
+        settings.skill = self.read_i8()? as i32;
+        settings.gameversion = self.read_u8()? as i32;
+        settings.lowres_turn = self.read_u8()? as i32;
+        settings.new_sync = self.read_u8()? as i32;
+        settings.timelimit = self.read_u32()?;
+        settings.loadgame = self.read_i8()? as i32;
+        settings.random = self.read_u8()? as i32;
+        settings.num_players = self.read_u8()? as i32;
+        settings.consoleplayer = self.read_i8()? as i32;
+
+        for i in 0..(settings.num_players as usize) {
             settings.player_classes[i] = self.read_u8()? as i32;
         }
+
         Some(settings)
     }
 
