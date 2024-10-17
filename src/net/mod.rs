@@ -74,71 +74,40 @@ pub enum Protocol {
     Unknown,
 }
 
+#[repr(u16)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PacketType {
-    Syn,
-    Ack,
-    Rejected,
-    KeepAlive,
-    WaitingData,
-    GameStart,
-    GameData,
-    GameDataAck,
-    Disconnect,
-    DisconnectAck,
-    ReliableAck,
-    GameDataResend,
-    ConsoleMessage,
-    Query,
-    QueryResponse,
-    Launch,
-    NatHolePunch,
+    Syn = 0,
+    Ack = 1,
+    Rejected = 2,
+    KeepAlive = 3,
+    WaitingData = 4,
+    GameStart = 5,
+    GameData = 6,
+    GameDataAck = 7,
+    Disconnect = 8,
+    DisconnectAck = 9,
+    ReliableAck = 10,
+    GameDataResend = 11,
+    ConsoleMessage = 12,
+    Query = 13,
+    QueryResponse = 14,
+    Launch = 15,
+    NatHolePunch = 16,
 }
 
 impl PacketType {
     pub fn from_u16(value: u16) -> Option<Self> {
-        match value {
-            0 => Some(PacketType::Syn),
-            1 => Some(PacketType::Ack),
-            2 => Some(PacketType::Rejected),
-            3 => Some(PacketType::KeepAlive),
-            4 => Some(PacketType::WaitingData),
-            5 => Some(PacketType::GameStart),
-            6 => Some(PacketType::GameData),
-            7 => Some(PacketType::GameDataAck),
-            8 => Some(PacketType::Disconnect),
-            9 => Some(PacketType::DisconnectAck),
-            10 => Some(PacketType::ReliableAck),
-            11 => Some(PacketType::GameDataResend),
-            12 => Some(PacketType::ConsoleMessage),
-            13 => Some(PacketType::Query),
-            14 => Some(PacketType::QueryResponse),
-            15 => Some(PacketType::Launch),
-            16 => Some(PacketType::NatHolePunch),
-            _ => None,
+        use std::mem::transmute;
+        if value <= PacketType::NatHolePunch as u16 {
+            Some(unsafe { transmute(value) })
+        } else {
+            None
         }
     }
 
     pub fn to_u16(self) -> u16 {
-        match self {
-            PacketType::Syn => 0,
-            PacketType::Ack => 1,
-            PacketType::Rejected => 2,
-            PacketType::KeepAlive => 3,
-            PacketType::WaitingData => 4,
-            PacketType::GameStart => 5,
-            PacketType::GameData => 6,
-            PacketType::GameDataAck => 7,
-            PacketType::Disconnect => 8,
-            PacketType::DisconnectAck => 9,
-            PacketType::ReliableAck => 10,
-            PacketType::GameDataResend => 11,
-            PacketType::ConsoleMessage => 12,
-            PacketType::Query => 13,
-            PacketType::QueryResponse => 14,
-            PacketType::Launch => 15,
-            PacketType::NatHolePunch => 16,
-        }
+        self as u16
     }
 }
 

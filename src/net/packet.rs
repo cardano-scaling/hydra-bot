@@ -346,4 +346,9 @@ impl Packet {
             self.write_i16(diff.cmd.inventory as i16);
         }
     }
+
+    pub fn write_protocol_list(&mut self) {
+        self.write_u8(1 as u8); // 1 Protocol
+        self.write_protocol(Protocol::ChocolateDoom0);
+    }
 }

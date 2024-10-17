@@ -626,7 +626,7 @@ impl Client {
 
         for tic in start..=end {
             if let Some(send_obj) = self.send_queue.get(tic as usize % BACKUPTICS) {
-                packet.write_i16(self.last_latency.try_into().unwrap());
+                packet.write_i16(self.last_latency as i16);
                 packet.write_ticcmd_diff(&send_obj.cmd, lowres_turn);
             }
         }
@@ -969,7 +969,7 @@ impl Client {
                 last_send_time = now;
             }
 
-            self.run();
+            self.receive_packets();
 
             thread::sleep(Duration::from_millis(1));
         }
@@ -990,9 +990,7 @@ impl Client {
         packet.write_u16(PacketType::Syn.to_u16());
         packet.write_u32(NET_MAGIC_NUMBER);
         packet.write_string(PACKAGE_STRING);
-        // Write a list of supported protocols (assuming only one protocol for now)
-        packet.write_u8(1); // Number of protocols
-        packet.write_protocol(self.protocol);
+        packet.write_protocol_list();
         packet.write_connect_data(connect_data);
         packet.write_string(&self.player_name);
 
