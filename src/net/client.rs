@@ -178,6 +178,7 @@ impl Client {
 
     fn receive_packets(&mut self) {
         let mut buf = [0u8; 4096];
+
         while let Ok((size, addr)) = self.socket.recv_from(&mut buf) {
             debug!("Received {} bytes from {:?}", size, addr);
             let packet_data = buf[..size].to_vec();
@@ -209,7 +210,6 @@ impl Client {
     }
 
     fn handle_waiting_launch(&mut self) {
-        // Send waiting data requests, manage timeouts, etc.
         self.net_waiting_for_launch = true;
         debug!("Waiting for launch");
     }
@@ -222,7 +222,6 @@ impl Client {
     }
 
     fn handle_in_game(&mut self) {
-        // Regular in-game processing
         self.advance_window();
         let last_ticcmd = self.last_ticcmd;
         let gametic = self.gametic;
@@ -240,15 +239,7 @@ impl Client {
         self.reject_reason = Some("Connection attempt timed out".to_string());
         info!("Disconnected from server");
 
-        // Notify game logic of disconnection
-        self.notify_disconnection();
-
-        // Clean up resources
         self.shutdown();
-    }
-
-    fn notify_disconnection(&mut self) {
-        // Implement disconnection notification logic
     }
 
     fn handle_disconnection_timeout(&mut self) {
@@ -420,7 +411,6 @@ impl Client {
                 self.state = ClientState::WaitingStart;
                 info!("Now waiting to start the game");
 
-                // Send a response to confirm receipt of launch packet
                 self.send_launch_response();
             }
         } else {
@@ -1000,8 +990,6 @@ impl Client {
     }
 
     pub fn build_ticcmd(&mut self, cmd: &mut TicCmd, maketic: u32) {
-        // This is analogous to G_BuildTiccmd in the C code
-
         // For a bot, we'll implement some simple movement
         let mut rng = rand::thread_rng();
 
@@ -1025,17 +1013,12 @@ impl Client {
     }
 
     pub fn run_tic(&mut self, cmds: &[TicCmd; NET_MAXPLAYERS], ingame: &[bool; NET_MAXPLAYERS]) {
-        // This is analogous to G_Ticker in the C code
-
-        // Update game state based on commands
         for (i, (&cmd, &in_game)) in cmds.iter().zip(ingame.iter()).enumerate() {
             if in_game {
-                // Apply the command for this player
                 self.apply_command(i, &cmd);
             }
         }
 
-        // Update game objects, AI, etc.
         self.update_world();
 
         debug!(
@@ -1045,14 +1028,10 @@ impl Client {
     }
 
     fn apply_command(&mut self, player_num: usize, cmd: &TicCmd) {
-        // Apply the command to the player's game object
-        // This is a placeholder and should be expanded based on your game logic
         debug!("Applied command for player {}: {:?}", player_num, cmd);
     }
 
     fn update_world(&mut self) {
-        // Update all game objects, run AI, etc.
-        // This is a placeholder and should be expanded based on your game logic
         debug!("Updated world state");
     }
 
