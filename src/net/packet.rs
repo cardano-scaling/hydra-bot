@@ -26,15 +26,15 @@ impl Packet {
     }
 
     pub fn write_connect_data(&mut self, data: &ConnectData) {
-        self.write_u8(data.gamemode as u8);
-        self.write_u8(data.gamemission as u8);
-        self.write_u8(data.lowres_turn as u8);
-        self.write_u8(data.drone as u8);
-        self.write_u8(data.max_players as u8);
-        self.write_u8(data.is_freedoom as u8);
+        self.write_u8(data.gamemode);
+        self.write_u8(data.gamemission);
+        self.write_u8(data.lowres_turn);
+        self.write_u8(data.drone);
+        self.write_u8(data.max_players);
+        self.write_u8(data.is_freedoom);
         self.write_blob(&data.wad_sha1sum);
         self.write_blob(&data.deh_sha1sum);
-        self.write_u8(data.player_class as u8);
+        self.write_u8(data.player_class);
     }
 
     pub fn read_protocol(&mut self) -> Option<Protocol> {

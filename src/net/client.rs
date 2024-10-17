@@ -947,6 +947,7 @@ impl Client {
         let start_time = Instant::now();
         let mut last_send_time = Instant::now() - Duration::from_secs(1);
 
+        let mut syn_sent = false;
         while self.state == ClientState::Connecting {
             let now = Instant::now();
 
@@ -954,14 +955,19 @@ impl Client {
                 return Err("Connection timed out".to_string());
             }
 
-            if now.duration_since(last_send_time) >= Duration::from_secs(1) {
+            if !syn_sent || now.duration_since(last_send_time) >= Duration::from_secs(1) {
                 self.send_syn(&connect_data);
                 last_send_time = now;
+                syn_sent = true;
             }
 
             self.receive_packets();
 
-            thread::sleep(Duration::from_millis(1));
+            if self.state != ClientState::Connecting {
+                break; // Exit the loop if we've received a response
+            }
+
+            thread::sleep(Duration::from_millis(10));
         }
 
         if self.state == ClientState::Connected {
