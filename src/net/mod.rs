@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
-pub const NET_MAGIC_NUMBER: u32 = 0x6abe18c4;
+pub const NET_MAGIC_NUMBER: u32 = 0x56abe18c;
 pub const NET_MAXPLAYERS: usize = 8;
 pub const MAXPLAYERNAME: usize = 30;
 pub const BACKUPTICS: usize = 128;
@@ -32,7 +32,7 @@ pub struct TicCmd {
     pub arti: u8,
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ConnectData {
     pub gamemode: u8,
     pub gamemission: u8,
@@ -43,6 +43,22 @@ pub struct ConnectData {
     pub wad_sha1sum: [u8; 20],
     pub deh_sha1sum: [u8; 20],
     pub player_class: u8,
+}
+
+impl Default for ConnectData {
+    fn default() -> Self {
+        ConnectData {
+            gamemode: 1,
+            gamemission: 0,
+            lowres_turn: 0,
+            drone: 0,
+            max_players: 4,
+            is_freedoom: 0,
+            wad_sha1sum: [0; 20],
+            deh_sha1sum: [0; 20],
+            player_class: 13,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]

@@ -347,8 +347,5 @@ impl Packet {
         }
     }
 
-    pub fn write_protocol_list(&mut self) {
-        self.write_u8(1 as u8); // 1 Protocol
-        self.write_protocol(Protocol::ChocolateDoom0);
-    }
+    // Remove this function as it's no longer needed
 }

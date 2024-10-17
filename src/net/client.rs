@@ -85,11 +85,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(player_name: String, drone: bool) -> io::Result<Self> {
-        info!(
-            "Creating new Client: player_name={}, drone={}",
-            player_name, drone
-        );
+    pub fn new(drone: bool) -> io::Result<Self> {
+        info!("Creating new Client: drone={}", drone);
 
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
@@ -99,7 +96,7 @@ impl Client {
             server_addr: None,
             settings: None,
             reject_reason: None,
-            player_name,
+            player_name: "pcfcosta".to_string(),
             drone,
             recv_window_start: 0,
             recv_window: [ServerRecv::default(); BACKUPTICS],
@@ -933,8 +930,10 @@ impl Client {
     pub fn connect<A: ToSocketAddrs>(
         &mut self,
         addr: A,
-        connect_data: ConnectData,
+        mut connect_data: ConnectData,
     ) -> Result<(), String> {
+        // Ensure max_players is set to 4
+        connect_data.max_players = 4;
         let addr = addr
             .to_socket_addrs()
             .map_err(|e| format!("Failed to resolve address: {}", e))?
@@ -986,8 +985,10 @@ impl Client {
         packet.write_u16(PacketType::Syn.to_u16());
         packet.write_u32(NET_MAGIC_NUMBER);
         packet.write_string(PACKAGE_STRING);
-        packet.write_protocol_list();
+        packet.write_u8(1); // Number of protocols
+        packet.write_string("CHOCOLATE_DOOM_0");
         packet.write_connect_data(connect_data);
+        packet.write_u8(connect_data.player_class);
         packet.write_string(&self.player_name);
 
         self.send_packet(&packet);
