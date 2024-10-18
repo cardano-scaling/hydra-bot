@@ -1,4 +1,5 @@
 use rand::prelude::*;
+use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant};
 use std::{io, thread};
@@ -10,7 +11,6 @@ use super::packet::Packet;
 use super::*;
 
 const PACKAGE_STRING: &str = "Chocolate Doom 3.0.1";
-const KEEPALIVE_PERIOD: Duration = Duration::from_secs(1);
 
 struct PIDController {
     kp: f32,
@@ -75,6 +75,7 @@ pub struct Client {
     connection_start_time: Instant,
     last_syn_time: Instant,
     connect_data: ConnectData,
+    player_addresses: HashMap<usize, u8>,
 }
 
 impl Client {
@@ -116,6 +117,7 @@ impl Client {
             connection_start_time: Instant::now(),
             last_syn_time: Instant::now(),
             connect_data: ConnectData::default(),
+            player_addresses: HashMap::new(),
         })
     }
 
@@ -183,7 +185,7 @@ impl Client {
     pub fn run(&mut self) {
         self.receive_packets();
         self.handle_state();
-        self.send_keepalive();
+        self.check_keepalive();
         self.check_resends();
 
         if self.need_acknowledge {
@@ -211,17 +213,73 @@ impl Client {
         }
     }
 
+    fn send_syn(&mut self) {
+        let mut packet = Packet::new();
+        packet.write_u16(PacketType::Syn.to_u16());
+        packet.write_u32(NET_MAGIC_NUMBER);
+        packet.write_string(PACKAGE_STRING);
+        packet.write_protocol(Protocol::ChocolateDoom0);
+        packet.write_connect_data(&self.connect_data);
+        packet.write_string(&self.player_name);
+        self.send_packet(&packet);
+        debug!("SYN packet sent with player name: {}", self.player_name);
+    }
+
+    fn send_keepalive(&mut self) {
+        if (self.state == ClientState::Connected || self.state == ClientState::InGame)
+            && self.last_send_time.elapsed() > Duration::from_secs(1)
+        {
+            let mut packet = Packet::new();
+            packet.write_u16(PacketType::KeepAlive.to_u16());
+            self.send_packet(&packet);
+            self.last_send_time = Instant::now();
+        }
+    }
+
+    fn check_keepalive(&mut self) {
+        if self.last_send_time.elapsed() > Duration::from_secs(1) {
+            self.send_keepalive();
+        }
+    }
+
     fn receive_packets(&mut self) {
         let mut buf = [0u8; 4096];
 
-        while let Ok((size, addr)) = self.socket.recv_from(&mut buf) {
-            debug!("Received {} bytes from {:?}", size, addr);
+        while let Ok((size, _)) = self.socket.recv_from(&mut buf) {
             let packet_data = buf[..size].to_vec();
             let mut packet = Packet {
                 data: packet_data,
                 pos: 0,
             };
             self.parse_packet(&mut packet);
+        }
+    }
+
+    fn parse_packet(&mut self, packet: &mut Packet) {
+        if let Some(packet_type) = packet.read_u16().and_then(PacketType::from_u16) {
+            match packet_type {
+                PacketType::Syn => self.parse_syn(packet),
+                PacketType::Ack => self.parse_ack(packet),
+                PacketType::Rejected => self.parse_reject(packet),
+                PacketType::WaitingData => self.parse_waiting_data(packet),
+                PacketType::Launch => self.parse_launch(packet),
+                PacketType::GameStart => self.parse_game_start(packet),
+                PacketType::GameData => self.parse_game_data(packet),
+                PacketType::GameDataResend => self.parse_resend_request(packet),
+                PacketType::ConsoleMessage => self.parse_console_message(packet),
+                PacketType::Disconnect => self.parse_disconnect(packet),
+                PacketType::DisconnectAck => self.parse_disconnect_ack(packet),
+                PacketType::KeepAlive => {} // Do nothing for keep-alive packets
+                PacketType::ReliableAck => self.parse_reliable_ack(packet),
+                _ => warn!("Unknown packet type: {:?}", packet_type),
+            }
+        }
+    }
+
+    fn parse_reliable_ack(&mut self, packet: &mut Packet) {
+        if let Some(seq) = packet.read_u32() {
+            self.reliable_packets.remove(&seq);
+            debug!("Received RELIABLE_ACK for sequence {}", seq);
         }
     }
 
@@ -253,41 +311,9 @@ impl Client {
         self.shutdown();
     }
 
-    fn send_keepalive(&mut self) {
-        if (self.state == ClientState::Connected || self.state == ClientState::InGame)
-            && self.last_send_time.elapsed() > KEEPALIVE_PERIOD
-        {
-            let mut packet = Packet::new();
-            packet.write_u16(PacketType::GameDataAck.to_u16());
-            packet.write_u8((self.recv_window_start & 0xff) as u8);
-            self.send_packet(&packet);
-            self.last_send_time = Instant::now();
-        }
-    }
-
     fn shutdown(&mut self) {
         self.state = ClientState::Disconnected;
         self.net_client_connected = false;
-    }
-
-    fn parse_packet(&mut self, packet: &mut Packet) {
-        if let Some(packet_type) = packet.read_u16().and_then(PacketType::from_u16) {
-            match packet_type {
-                PacketType::Syn => self.parse_syn(packet),
-                PacketType::Ack => self.parse_ack(packet),
-                PacketType::Rejected => self.parse_reject(packet),
-                PacketType::WaitingData => self.parse_waiting_data(packet),
-                PacketType::Launch => self.parse_launch(packet),
-                PacketType::GameStart => self.parse_game_start(packet),
-                PacketType::GameData => self.parse_game_data(packet),
-                PacketType::GameDataResend => self.parse_resend_request(packet),
-                PacketType::ConsoleMessage => self.parse_console_message(packet),
-                PacketType::Disconnect => self.parse_disconnect(packet),
-                PacketType::DisconnectAck => self.parse_disconnect_ack(packet),
-                PacketType::KeepAlive => debug!("Received keep-alive packet"),
-                _ => warn!("Unknown packet type: {:?}", packet_type),
-            }
-        }
     }
 
     fn parse_disconnect(&mut self, packet: &mut Packet) {
@@ -333,7 +359,8 @@ impl Client {
 
     fn send_ack(&mut self) {
         let mut ack_packet = Packet::new();
-        ack_packet.write_u16(PacketType::Ack.to_u16());
+        ack_packet.write_u16(PacketType::Ack.to_u16() | 0x8000); // Set high bit
+        ack_packet.write_string(PACKAGE_STRING);
         ack_packet.write_protocol(self.protocol);
         self.send_packet(&ack_packet);
         info!("ACK sent to server");
@@ -374,6 +401,15 @@ impl Client {
                 debug!("Received waiting data: {:?}", self.net_client_wait_data);
 
                 self.is_freedoom = self.net_client_wait_data.is_freedoom as u8;
+
+                // Parse and store player addresses
+                for i in 0..self.net_client_wait_data.num_players as usize {
+                    let addr_str: String =
+                        self.net_client_wait_data.player_addrs[i].iter().collect();
+                    if let Ok(addr) = addr_str.parse() {
+                        self.player_addresses.insert(i, addr);
+                    }
+                }
 
                 self.send_ack();
             }
@@ -841,7 +877,18 @@ impl Client {
         self.connect_data = connect_data;
 
         while self.state == ClientState::Connecting {
-            self.run();
+            if self.last_syn_time.elapsed() >= Duration::from_secs(1) {
+                self.send_syn();
+                self.last_syn_time = Instant::now();
+
+                // Send GAMEDATA_RESEND packets immediately after SYN
+                for _ in 0..3 {
+                    self.send_gamedata_resend();
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+
+            self.receive_packets();
 
             if self.connection_start_time.elapsed() > Duration::from_secs(120) {
                 return Err("Connection timed out".to_string());
@@ -860,15 +907,11 @@ impl Client {
         }
     }
 
-    fn send_syn(&mut self) {
+    fn send_gamedata_resend(&mut self) {
         let mut packet = Packet::new();
-        packet.write_u16(PacketType::Syn.to_u16());
-        packet.write_u32(NET_MAGIC_NUMBER);
-        packet.write_string(PACKAGE_STRING);
-        packet.write_u8(1); // Number of protocols
-        packet.write_string("CHOCOLATE_DOOM_0");
-        packet.write_connect_data(&self.connect_data);
-        packet.write_string(&self.player_name);
+        packet.write_u16(PacketType::GameDataResend.to_u16());
+        packet.write_u32(0); // Sequence number or other data
+        packet.write_u8(0x80); // The 128 value we observed
         self.send_packet(&packet);
     }
 

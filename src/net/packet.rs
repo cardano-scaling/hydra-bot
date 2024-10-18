@@ -34,6 +34,15 @@ impl Packet {
         self.write_u8(data.player_class);
     }
 
+    pub fn write_u32(&mut self, value: u32) {
+        self.data.extend_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn write_string(&mut self, s: &str) {
+        self.data.extend_from_slice(s.as_bytes());
+        self.data.push(0); // Null terminator
+    }
+
     pub fn read_protocol(&mut self) -> Option<Protocol> {
         self.read_string().and_then(|s| match s.as_str() {
             "CHOCOLATE_DOOM_0" => Some(Protocol::ChocolateDoom0),
@@ -128,17 +137,8 @@ impl Packet {
         self.data.extend_from_slice(&value.to_le_bytes());
     }
 
-    pub fn write_u32(&mut self, value: u32) {
-        self.data.extend_from_slice(&value.to_le_bytes());
-    }
-
     pub fn write_i32(&mut self, value: i32) {
         self.data.extend_from_slice(&value.to_le_bytes());
-    }
-
-    pub fn write_string(&mut self, s: &str) {
-        self.data.extend_from_slice(s.as_bytes());
-        self.data.push(0); // Null terminator
     }
 
     pub fn read_u8(&mut self) -> Option<u8> {

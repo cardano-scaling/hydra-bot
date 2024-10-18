@@ -56,14 +56,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let connect_data = ConnectData {
         gamemode: 1,
-        gamemission: 0,
+        gamemission: 4,
         lowres_turn: 0,
-        drone: 0,
-        max_players: 4,
-        is_freedoom: 0,
+        drone: 119,
+        max_players: 66,
+        is_freedoom: 8,
         wad_sha1sum: wad_sha1.into(),
         deh_sha1sum: [0; 20],
-        player_class: 0x16,
+        player_class: 22,
     };
 
     info!("Connecting with data: {:?}", connect_data);

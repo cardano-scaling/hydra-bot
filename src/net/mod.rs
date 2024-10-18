@@ -54,17 +54,26 @@ impl Default for ConnectData {
             drone: 0,
             max_players: 4,
             is_freedoom: 0,
-            wad_sha1sum: [
-                0x9b, 0x3a, 0x4c, 0xdd, 0xeb, 0x40, 0x12, 0xfc, 0x03, 0x76, 0xd1, 0xad, 0x93, 0x53,
-                0x17, 0x4a, 0x8d, 0xaa, 0x24, 0xc,
-            ],
-            deh_sha1sum: [
-                0xc4, 0xfb, 0xed, 0x9b, 0xa4, 0xae, 0x5e, 0xbe, 0xa9, 0x57, 0xaa, 0x14, 0x9b, 0x51,
-                0xa1, 0x19, 0xaa, 0xf0, 0x31, 0x6,
-            ],
-            player_class: 13, // 0x0d in hexadecimal
+            wad_sha1sum: [0; 20],
+            deh_sha1sum: [0; 20],
+            player_class: 112,
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct WaitData {
+    pub num_players: i32,
+    pub num_drones: i32,
+    pub ready_players: i32,
+    pub max_players: i32,
+    pub is_controller: i32,
+    pub consoleplayer: i32,
+    pub player_names: [[char; MAXPLAYERNAME]; NET_MAXPLAYERS],
+    pub player_addrs: [[char; MAXPLAYERNAME]; NET_MAXPLAYERS],
+    pub wad_sha1sum: [u8; 20],
+    pub deh_sha1sum: [u8; 20],
+    pub is_freedoom: i32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
@@ -145,21 +154,6 @@ pub struct FullTicCmd {
     pub seq: u32,
     pub playeringame: [bool; NET_MAXPLAYERS],
     pub cmds: [TicDiff; NET_MAXPLAYERS],
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct WaitData {
-    pub num_players: i32,
-    pub num_drones: i32,
-    pub ready_players: i32,
-    pub max_players: i32,
-    pub is_controller: i32,
-    pub consoleplayer: i32,
-    pub player_names: [[char; MAXPLAYERNAME]; NET_MAXPLAYERS],
-    pub player_addrs: [[char; MAXPLAYERNAME]; NET_MAXPLAYERS],
-    pub wad_sha1sum: [u8; 20],
-    pub deh_sha1sum: [u8; 20],
-    pub is_freedoom: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

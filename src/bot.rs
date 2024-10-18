@@ -35,10 +35,10 @@ pub struct Bot {
 }
 
 struct BotSkill {
-    aiming: i32,
-    perfection: i32,
+    // aiming: i32,
+    // perfection: i32,
     reaction: i32,
-    isp: i32,
+    // isp: i32,
 }
 
 impl Bot {
@@ -63,10 +63,10 @@ impl Bot {
             oldx: 0,
             oldy: 0,
             skill: BotSkill {
-                aiming: 50,
-                perfection: 50,
+                // aiming: 50,
+                // perfection: 50,
                 reaction: 50,
-                isp: 50,
+                // isp: 50,
             },
             allround: false,
             increase: false,
