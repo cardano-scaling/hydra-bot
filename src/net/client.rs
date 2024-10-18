@@ -1,5 +1,4 @@
 use rand::prelude::*;
-use rand::Rng;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant};
 use std::{io, thread};
@@ -65,7 +64,6 @@ pub struct Client {
     net_client_wait_data: WaitData,
     last_send_time: Instant,
     last_ticcmd: TicCmd,
-    recvwindow_cmd_base: [TicCmd; NET_MAXPLAYERS],
     start_time: Instant,
     protocol: Protocol,
     is_freedoom: u8,
@@ -104,7 +102,6 @@ impl Client {
             net_client_wait_data: WaitData::default(),
             last_send_time: Instant::now(),
             last_ticcmd: TicCmd::default(),
-            recvwindow_cmd_base: [TicCmd::default(); NET_MAXPLAYERS],
             start_time: Instant::now(),
             protocol: Protocol::ChocolateDoom0,
             is_freedoom: 0,
@@ -150,10 +147,35 @@ impl Client {
         pet_names.choose(&mut rng).unwrap_or(&"Player").to_string()
     }
 
-    pub fn run(&mut self) {
-        self.bot
-            .tick(self.state, self.last_ticcmd, self.recvwindow_cmd_base);
+    pub fn build_and_send_tic(&mut self, maketic: u32) {
+        if maketic % self.settings.as_ref().map_or(1, |s| s.ticdup as u32) != 0 {
+            return;
+        }
 
+        let mut ticcmd = TicCmd::default();
+        self.bot.build_ticcmd(&mut ticcmd, maketic);
+
+        let mut diff = TicDiff::default();
+        self.calculate_ticcmd_diff(&ticcmd, &mut diff);
+
+        if !self.drone {
+            let sendobj = &mut self.send_queue[maketic as usize % BACKUPTICS];
+            sendobj.active = true;
+            sendobj.seq = maketic;
+            sendobj.time = Instant::now();
+            sendobj.cmd = diff;
+
+            let starttic =
+                maketic.saturating_sub(self.settings.as_ref().map_or(0, |s| s.extratics as u32));
+            let endtic = maketic;
+
+            self.send_tics(starttic, endtic);
+        }
+
+        self.last_ticcmd = ticcmd;
+    }
+
+    pub fn run(&mut self) {
         self.receive_packets();
         self.handle_state();
 
@@ -164,6 +186,10 @@ impl Client {
         self.handle_state();
         self.send_keepalive();
         self.check_resends();
+
+        if self.state == ClientState::InGame {
+            self.build_and_send_tic(self.gametic as u32);
+        }
     }
 
     fn receive_packets(&mut self) {
@@ -213,9 +239,6 @@ impl Client {
 
     fn handle_in_game(&mut self) {
         self.advance_window();
-        let last_ticcmd = self.last_ticcmd;
-        let gametic = self.gametic;
-        self.send_ticcmd(&last_ticcmd, gametic as u32);
     }
 
     fn handle_disconnecting(&mut self) {
@@ -591,7 +614,7 @@ impl Client {
         debug!("Game data acknowledgment sent");
     }
 
-    fn send_tics(&mut self, start: u32, end: u32) {
+    pub fn send_tics(&mut self, start: u32, end: u32) {
         if !self.net_client_connected {
             return;
         }
@@ -614,71 +637,6 @@ impl Client {
         self.send_packet(&packet);
         self.need_acknowledge = false;
         debug!("Sent tics from {} to {}", start, end);
-    }
-
-    pub fn send_ticcmd(&mut self, ticcmd: &TicCmd, maketic: u32) {
-        // Only build a new ticcmd every ticdup tics
-        if maketic % self.settings.as_ref().map_or(1, |s| s.ticdup as u32) != 0 {
-            // Use the previous ticcmd
-            return;
-        }
-
-        let mut diff = TicDiff::default();
-        self.calculate_ticcmd_diff(ticcmd, &mut diff);
-
-        // Drones do not send ticcmds to the server.
-        if self.drone {
-            return;
-        }
-
-        let sendobj = &mut self.send_queue[maketic as usize % BACKUPTICS];
-        sendobj.active = true;
-        sendobj.seq = maketic;
-        sendobj.time = Instant::now();
-        sendobj.cmd = diff;
-
-        // Only send tics up to maketic - extratics
-        let starttic =
-            maketic.saturating_sub(self.settings.as_ref().map_or(0, |s| s.extratics as u32));
-        let endtic = maketic;
-
-        self.send_tics(starttic, endtic);
-    }
-
-    fn calculate_ticcmd_diff(&self, ticcmd: &TicCmd, diff: &mut TicDiff) {
-        diff.diff = 0;
-        diff.cmd = *ticcmd;
-
-        if self.last_ticcmd.forwardmove != ticcmd.forwardmove {
-            diff.diff |= NET_TICDIFF_FORWARD;
-        }
-        if self.last_ticcmd.sidemove != ticcmd.sidemove {
-            diff.diff |= NET_TICDIFF_SIDE;
-        }
-        if self.last_ticcmd.angleturn != ticcmd.angleturn {
-            diff.diff |= NET_TICDIFF_TURN;
-        }
-        if self.last_ticcmd.buttons != ticcmd.buttons {
-            diff.diff |= NET_TICDIFF_BUTTONS;
-        }
-        if self.last_ticcmd.consistancy != ticcmd.consistancy {
-            diff.diff |= NET_TICDIFF_CONSISTANCY;
-        }
-        if ticcmd.chatchar != 0 {
-            diff.diff |= NET_TICDIFF_CHATCHAR;
-        } else {
-            diff.cmd.chatchar = 0;
-        }
-        if self.last_ticcmd.lookfly != ticcmd.lookfly || ticcmd.arti != 0 {
-            diff.diff |= NET_TICDIFF_RAVEN;
-        } else {
-            diff.cmd.arti = 0;
-        }
-        if self.last_ticcmd.buttons2 != ticcmd.buttons2 || ticcmd.inventory != 0 {
-            diff.diff |= NET_TICDIFF_STRIFE;
-        } else {
-            diff.cmd.inventory = 0;
-        }
     }
 
     fn advance_window(&mut self) {
@@ -711,7 +669,6 @@ impl Client {
             .as_ref()
             .map_or(0, |s| s.consoleplayer as usize);
         let drone = self.drone;
-        let mut recvwindow_cmd_base = self.recvwindow_cmd_base;
 
         for i in 0..NET_MAXPLAYERS {
             if i == consoleplayer && !drone {
@@ -720,13 +677,11 @@ impl Client {
 
             if cmd.playeringame[i] {
                 let diff = &cmd.cmds[i];
-                let mut base = recvwindow_cmd_base[i];
+                let mut base = self.bot.recvwindow_cmd_base[i];
                 Self::apply_ticcmd_diff(&mut base, diff, &mut ticcmds[i]);
-                recvwindow_cmd_base[i] = ticcmds[i];
+                self.bot.recvwindow_cmd_base[i] = ticcmds[i];
             }
         }
-
-        self.recvwindow_cmd_base = recvwindow_cmd_base;
     }
 
     fn apply_ticcmd_diff(base: &mut TicCmd, diff: &TicDiff, result: &mut TicCmd) {
@@ -775,8 +730,7 @@ impl Client {
     ) {
         for (i, (&cmd, &ingame)) in ticcmds.iter().zip(playeringame.iter()).enumerate() {
             if ingame {
-                // store the received ticcmd for this player
-                self.recvwindow_cmd_base[i] = cmd;
+                self.bot.recvwindow_cmd_base[i] = cmd;
             }
         }
 
@@ -958,7 +912,7 @@ impl Client {
         packet.write_connect_data(connect_data);
         packet.write_string(&self.player_name);
 
-        // self.send_packet(packet);
+        self.send_packet(packet);
     }
 
     pub fn run_tic(&mut self, cmds: &[TicCmd; NET_MAXPLAYERS], ingame: &[bool; NET_MAXPLAYERS]) {
@@ -974,6 +928,42 @@ impl Client {
             "Ran tic, applied commands for {} players",
             ingame.iter().filter(|&&x| x).count()
         );
+    }
+
+    pub fn calculate_ticcmd_diff(&self, ticcmd: &TicCmd, diff: &mut TicDiff) {
+        diff.diff = 0;
+        diff.cmd = *ticcmd;
+
+        if self.last_ticcmd.forwardmove != ticcmd.forwardmove {
+            diff.diff |= NET_TICDIFF_FORWARD;
+        }
+        if self.last_ticcmd.sidemove != ticcmd.sidemove {
+            diff.diff |= NET_TICDIFF_SIDE;
+        }
+        if self.last_ticcmd.angleturn != ticcmd.angleturn {
+            diff.diff |= NET_TICDIFF_TURN;
+        }
+        if self.last_ticcmd.buttons != ticcmd.buttons {
+            diff.diff |= NET_TICDIFF_BUTTONS;
+        }
+        if self.last_ticcmd.consistancy != ticcmd.consistancy {
+            diff.diff |= NET_TICDIFF_CONSISTANCY;
+        }
+        if ticcmd.chatchar != 0 {
+            diff.diff |= NET_TICDIFF_CHATCHAR;
+        } else {
+            diff.cmd.chatchar = 0;
+        }
+        if self.last_ticcmd.lookfly != ticcmd.lookfly || ticcmd.arti != 0 {
+            diff.diff |= NET_TICDIFF_RAVEN;
+        } else {
+            diff.cmd.arti = 0;
+        }
+        if self.last_ticcmd.buttons2 != ticcmd.buttons2 || ticcmd.inventory != 0 {
+            diff.diff |= NET_TICDIFF_STRIFE;
+        } else {
+            diff.cmd.inventory = 0;
+        }
     }
 
     fn apply_command(&mut self, player_num: usize, cmd: &TicCmd) {

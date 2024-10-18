@@ -1,5 +1,5 @@
 use crate::net::client::Client;
-use crate::net::{TicCmd, BACKUPTICS, NET_MAXPLAYERS};
+use crate::net::{TicCmd, TicDiff, BACKUPTICS, NET_MAXPLAYERS};
 
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
@@ -31,6 +31,11 @@ pub struct Game {
     oldnettics: i32,
     oldentertics: i32,
     last_net_update: Instant,
+    settings: Option<crate::net::GameSettings>,
+    bot: crate::bot::Bot,
+    drone: bool,
+    send_queue: [crate::net::ServerSend; BACKUPTICS],
+    last_ticcmd: TicCmd,
 }
 
 impl Game {
@@ -56,6 +61,11 @@ impl Game {
             oldnettics: 0,
             oldentertics: 0,
             last_net_update: Instant::now(),
+            settings: None,
+            bot: crate::bot::Bot::new(None),
+            drone: false,
+            send_queue: [crate::net::ServerSend::default(); BACKUPTICS],
+            last_ticcmd: TicCmd::default(),
         }
     }
 
@@ -72,34 +82,34 @@ impl Game {
         }
     }
 
-    fn build_new_tic(&mut self, client: &mut Client) -> bool {
-        let gameticdiv = self.maketic / self.ticdup;
-
-        if self.new_sync {
-            if !client.is_connected() && self.maketic - gameticdiv > 2 {
-                return false;
-            }
-
-            if self.maketic - gameticdiv > 8 {
-                return false;
-            }
-        } else if self.maketic - gameticdiv >= 5 {
-            return false;
+    pub fn build_and_send_tic(&mut self, client: &mut Client) -> bool {
+        let maketic = self.maketic as u32;
+        if maketic % self.settings.as_ref().map_or(1, |s| s.ticdup as u32) != 0 {
+            return true;
         }
 
-        let mut cmd = TicCmd::default();
-        client.build_ticcmd(&mut cmd, self.maketic as u32);
+        let mut ticcmd = TicCmd::default();
+        self.bot.build_ticcmd(&mut ticcmd, maketic);
 
-        if client.is_connected() {
-            client.send_ticcmd(&cmd, self.maketic as u32);
+        let mut diff = TicDiff::default();
+        client.calculate_ticcmd_diff(&ticcmd, &mut diff);
+
+        if !self.drone {
+            let sendobj = &mut self.send_queue[maketic as usize % BACKUPTICS];
+            sendobj.active = true;
+            sendobj.seq = maketic;
+            sendobj.time = Instant::now();
+            sendobj.cmd = diff;
+
+            let starttic =
+                maketic.saturating_sub(self.settings.as_ref().map_or(0, |s| s.extratics as u32));
+            let endtic = maketic;
+
+            client.send_tics(starttic, endtic);
         }
 
-        let maketic = self.maketic as usize;
-        let localplayer = self.localplayer as usize;
-        self.ticdata[maketic % BACKUPTICS].cmds[localplayer] = cmd;
-        self.ticdata[maketic % BACKUPTICS].ingame[localplayer] = true;
+        self.last_ticcmd = ticcmd;
         self.maketic += 1;
-
         true
     }
 
@@ -133,9 +143,7 @@ impl Game {
         }
 
         for _ in 0..newtics {
-            if !self.build_new_tic(client) {
-                break;
-            }
+            client.build_and_send_tic(self.maketic as u32);
         }
     }
 
@@ -144,13 +152,15 @@ impl Game {
     }
 
     pub fn tick(&mut self, client: &mut Client) {
+        self.last_net_update = Instant::now();
+
         let enter_tic = (self.get_adjusted_time() / self.ticdup as u32) as i32;
 
         let mut counts;
         let mut lowtic;
 
         if self.singletics {
-            self.build_new_tic(client);
+            client.build_and_send_tic(self.maketic as u32);
         } else {
             self.net_update(client);
         }
@@ -173,7 +183,7 @@ impl Game {
         }
 
         while !self.players_in_game(client) || lowtic < self.gametic / self.ticdup + counts {
-            self.net_update(client);
+            client.run();
 
             lowtic = self.get_low_tic();
 
@@ -217,7 +227,11 @@ impl Game {
                 Self::ticdup_squash(set);
             }
 
-            self.net_update(client);
+            if !self.build_and_send_tic(client) {
+                break;
+            }
+
+            client.run();
             counts -= 1;
         }
         debug!("Finished running tics. New gametic: {}", self.gametic);
