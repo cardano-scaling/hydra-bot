@@ -9,6 +9,7 @@ use argh::FromArgs;
 use sha1::{Digest, Sha1};
 use tracing::{error, info};
 
+pub mod bot;
 mod game;
 mod net;
 

@@ -5,23 +5,14 @@ use std::time::{Duration, Instant};
 use std::{io, thread};
 use tracing::{debug, error, info, warn};
 
+use crate::bot::Bot;
+
 use super::packet::Packet;
 use super::*;
 
 const PACKAGE_STRING: &str = "Chocolate Doom 3.0.1";
 const KEEPALIVE_PERIOD: Duration = Duration::from_secs(1);
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ClientState {
-    Disconnected,
-    Connecting,
-    Connected,
-    WaitingLaunch,
-    WaitingStart,
-    InGame,
-    Disconnecting,
-}
 
 struct PIDController {
     kp: f32,
@@ -53,6 +44,8 @@ impl PIDController {
 }
 
 pub struct Client {
+    bot: Bot,
+
     socket: UdpSocket,
     state: ClientState,
     server_addr: Option<SocketAddr>,
@@ -91,12 +84,13 @@ impl Client {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
         Ok(Client {
+            bot: Bot::new(None),
             socket,
             state: ClientState::Disconnected,
             server_addr: None,
             settings: None,
             reject_reason: None,
-            player_name: "pcfcosta".to_string(), // Set the correct player name
+            player_name,
             drone: false,
             recv_window_start: 0,
             recv_window: [ServerRecv::default(); BACKUPTICS],
@@ -129,7 +123,8 @@ impl Client {
 
     pub fn init(&mut self) {
         debug!("Initializing Client");
-        self.init_bot();
+
+        self.bot.init();
         self.net_client_connected = false;
         self.net_client_received_wait_data = false;
         self.net_waiting_for_launch = false;
@@ -139,10 +134,6 @@ impl Client {
             debug!("Processing resend request");
             debug!("Player name set to: {}", self.player_name);
         }
-    }
-
-    fn init_bot(&mut self) {
-        // Bot initialization logic here
     }
 
     fn get_player_name() -> String {
@@ -160,14 +151,16 @@ impl Client {
     }
 
     pub fn run(&mut self) {
-        self.run_bot();
+        self.bot
+            .tick(self.state, self.last_ticcmd, self.recvwindow_cmd_base);
+
         self.receive_packets();
         self.handle_state();
 
-        // Send game data acknowledgment if needed
         if self.need_acknowledge {
             self.send_game_data_ack();
         }
+
         self.handle_state();
         self.send_keepalive();
         self.check_resends();
@@ -780,16 +773,14 @@ impl Client {
         ticcmds: &[TicCmd; NET_MAXPLAYERS],
         playeringame: &[bool; NET_MAXPLAYERS],
     ) {
-        // This is analogous to D_ReceiveTic in the C code
         for (i, (&cmd, &ingame)) in ticcmds.iter().zip(playeringame.iter()).enumerate() {
             if ingame {
-                // Store the received ticcmd for this player
+                // store the received ticcmd for this player
                 self.recvwindow_cmd_base[i] = cmd;
             }
         }
 
-        // Advance the game tic
-        // This would typically be handled by the game logic, but we'll increment it here for now
+        // advance game tic
         self.gametic += 1;
 
         debug!(
@@ -803,14 +794,14 @@ impl Client {
         let deadlock_timeout = Duration::from_secs(1);
 
         if now.duration_since(self.last_gamedata_time) > deadlock_timeout {
-            // Deadlock prevention logic
+            // deadlock prevention
             for i in 0..BACKUPTICS {
                 let recvobj = &mut self.recv_window[i];
 
                 if !recvobj.active && recvobj.resend_time == Instant::now() {
-                    // Send resend request for missing tic
+                    // send resend request for missing tic
                     let start = self.recv_window_start + i as u32;
-                    let end = start + 5; // Request 5 tics
+                    let end = start + 5; // request 5 tics
 
                     self.send_resend_request(start, end);
                     self.last_gamedata_time = now;
@@ -878,25 +869,6 @@ impl Client {
         }
     }
 
-    fn run_bot(&mut self) {
-        if self.state == ClientState::InGame {
-            let maketic = self.gametic; // Use gametic as maketic
-            let mut bot_ticcmd = TicCmd::default();
-            self.generate_bot_ticcmd(&mut bot_ticcmd);
-            self.send_ticcmd(&bot_ticcmd, maketic as u32);
-        }
-    }
-
-    fn generate_bot_ticcmd(&self, cmd: &mut TicCmd) {
-        // Implement bot AI logic here
-        // This is a placeholder implementation
-        let mut rng = rand::thread_rng();
-        cmd.forwardmove = rng.gen_range(-50..50);
-        cmd.sidemove = rng.gen_range(-50..50);
-        cmd.angleturn = rng.gen_range(-1024..1024);
-        cmd.buttons = if rng.gen_bool(0.1) { 1 } else { 0 };
-    }
-
     pub fn get_settings(&self) -> Option<GameSettings> {
         if self.state != ClientState::InGame {
             return None;
@@ -905,7 +877,6 @@ impl Client {
     }
 
     fn send_packet(&mut self, packet: &Packet) {
-        // Check if the packet is reliable
         let is_reliable = matches!(
             PacketType::from_u16(u16::from_le_bytes([packet.data[0], packet.data[1]])),
             Some(PacketType::Syn)
@@ -915,7 +886,6 @@ impl Client {
         );
 
         if is_reliable {
-            // Store the packet for possible retransmission
             self.reliable_packets
                 .insert(self.next_reliable_seq, packet.clone());
             self.next_reliable_seq += 1;
@@ -955,7 +925,7 @@ impl Client {
             }
 
             if !syn_sent || now.duration_since(last_send_time) >= Duration::from_secs(1) {
-                self.send_syn(&connect_data);
+                self.send_syn(&connect_data, &mut Packet::new());
                 last_send_time = now;
                 syn_sent = true;
             }
@@ -979,44 +949,16 @@ impl Client {
         }
     }
 
-    fn send_syn(&mut self, connect_data: &ConnectData) {
-        let mut packet = Packet::new();
-
+    fn send_syn(&mut self, connect_data: &ConnectData, packet: &mut Packet) {
         packet.write_u16(PacketType::Syn.to_u16());
-        packet.write_u32(0x56abe18c); // Correct NET_MAGIC_NUMBER in little-endian
+        packet.write_u32(0x56abe18c);
         packet.write_string(PACKAGE_STRING);
         packet.write_u8(1); // Number of protocols
         packet.write_string("CHOCOLATE_DOOM_0");
         packet.write_connect_data(connect_data);
-        packet.write_u8(connect_data.player_class);
         packet.write_string(&self.player_name);
 
-        self.send_packet(&packet);
-        info!("SYN sent to server: {} bytes", packet.data.len());
-        debug!("SYN packet data: {:x?}", packet.data);
-    }
-
-    pub fn build_ticcmd(&mut self, cmd: &mut TicCmd, maketic: u32) {
-        // For a bot, we'll implement some simple movement
-        let mut rng = rand::thread_rng();
-
-        cmd.forwardmove = rng.gen_range(-50..50);
-        cmd.sidemove = rng.gen_range(-50..50);
-        cmd.angleturn = rng.gen_range(-1024..1024);
-
-        // Randomly fire
-        if rng.gen_bool(0.1) {
-            cmd.buttons |= 1; // Assuming 1 is the fire button
-        }
-
-        // Set the consistancy value
-        cmd.consistancy = self.recvwindow_cmd_base[self
-            .settings
-            .as_ref()
-            .map_or(0, |s| s.consoleplayer as usize)]
-        .consistancy;
-
-        debug!("Built ticcmd for tic {}: {:?}", maketic, cmd);
+        // self.send_packet(packet);
     }
 
     pub fn run_tic(&mut self, cmds: &[TicCmd; NET_MAXPLAYERS], ingame: &[bool; NET_MAXPLAYERS]) {
@@ -1103,6 +1045,51 @@ impl Client {
         debug!(
             "Clock sync: latency={}, remote_latency={}, error={}, adjustment={}, game_time_offset={}",
             latency, remote_latency, error, adjustment, self.game_time_offset
+        );
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::net::ConnectData;
+
+    #[test]
+    fn test_syn_message() {
+        // Create a client
+        let mut client = Client::new("hydra-bot".to_string()).unwrap();
+
+        // Create connect data
+        let connect_data = ConnectData {
+            gamemode: 1,
+            gamemission: 0,
+            lowres_turn: 0,
+            drone: 0,
+            max_players: 4,
+            is_freedoom: 0,
+            wad_sha1sum: [
+                0x77, 0x42, 0x08, 0x9b, 0x44, 0x68, 0xa7, 0x36, 0xca, 0xdb, 0x65, 0x9a, 0x7d, 0xec,
+                0xa3, 0x32, 0x0f, 0xe6, 0xdc, 0xbd,
+            ],
+            deh_sha1sum: [0x00; 20],
+            player_class: 22,
+        };
+
+        let mut packet = Packet::new();
+        client.send_syn(&connect_data, &mut packet);
+
+        let hex_string = packet
+            .data
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>();
+
+        // Expected hexadecimal string
+        let expected = "00008ce1ab5643686f636f6c61746520446f6f6d20332e302e31000143484f434f4c4154455f444f4f4d5f30000100000004007742089b4468a736cadb659a7deca3320fe6dcbd000000000000000000000000000000000000000016706366636f73746100";
+
+        // Assert that the generated packet matches the expected string
+        assert_eq!(
+            hex_string, expected,
+            "SYN message does not match expected format"
         );
     }
 }

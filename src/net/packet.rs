@@ -3,7 +3,7 @@ use std::convert::TryInto;
 
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Packet {
     pub data: Vec<u8>,
     pub pos: usize,
@@ -11,10 +11,7 @@ pub struct Packet {
 
 impl Packet {
     pub fn new() -> Self {
-        Packet {
-            data: Vec::new(),
-            pos: 0,
-        }
+        Packet::default()
     }
 
     pub fn write_blob(&mut self, data: &[u8]) {
@@ -34,7 +31,7 @@ impl Packet {
         self.write_u8(data.is_freedoom);
         self.write_blob(&data.wad_sha1sum);
         self.write_blob(&data.deh_sha1sum);
-        // Note: player_class is written separately in send_syn
+        self.write_u8(data.player_class);
     }
 
     pub fn read_protocol(&mut self) -> Option<Protocol> {
@@ -346,6 +343,4 @@ impl Packet {
             self.write_i16(diff.cmd.inventory as i16);
         }
     }
-
-    // Remove this function as it's no longer needed
 }
