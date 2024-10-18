@@ -23,6 +23,7 @@
 #include "net_defs.h"
 
 boolean NET_CL_Connect(net_addr_t *addr, net_connect_data_t *data);
+boolean NET_CL_ConnectWebsockets(net_addr_t *addr, net_connect_data_t *data);
 void NET_CL_Disconnect(void);
 void NET_CL_Run(void);
 void NET_CL_Init(void);
