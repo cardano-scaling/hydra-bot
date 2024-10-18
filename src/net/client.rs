@@ -221,7 +221,7 @@ impl Client {
         packet.write_protocol(Protocol::ChocolateDoom0);
         packet.write_connect_data(&self.connect_data);
         packet.write_string(&self.player_name);
-        self.send_packet(&packet);
+        self.send_packet(&mut packet);
         debug!("SYN packet sent with player name: {}", self.player_name);
     }
 
@@ -231,7 +231,7 @@ impl Client {
         {
             let mut packet = Packet::new();
             packet.write_u16(PacketType::KeepAlive.to_u16());
-            self.send_packet(&packet);
+            self.send_packet(&mut packet);
             self.last_send_time = Instant::now();
         }
     }
@@ -256,7 +256,11 @@ impl Client {
     }
 
     fn parse_packet(&mut self, packet: &mut Packet) {
-        if let Some(packet_type) = packet.read_u16().and_then(PacketType::from_u16) {
+        if let Some(packet_type) = packet
+            .read_u16()
+            .map(|pt| pt & !0x8000)
+            .and_then(PacketType::from_u16)
+        {
             match packet_type {
                 PacketType::Syn => self.parse_syn(packet),
                 PacketType::Ack => self.parse_ack(packet),
@@ -359,10 +363,10 @@ impl Client {
 
     fn send_ack(&mut self) {
         let mut ack_packet = Packet::new();
-        ack_packet.write_u16(PacketType::Ack.to_u16() | 0x8000); // Set high bit
+        ack_packet.write_u16(PacketType::Ack.to_u16()); // No high bit set
         ack_packet.write_string(PACKAGE_STRING);
         ack_packet.write_protocol(self.protocol);
-        self.send_packet(&ack_packet);
+        self.send_packet(&mut ack_packet);
         info!("ACK sent to server");
     }
 
@@ -446,7 +450,7 @@ impl Client {
     fn send_launch_response(&mut self) {
         let mut packet = Packet::new();
         packet.write_u16(PacketType::Launch.to_u16());
-        self.send_packet(&packet);
+        self.send_packet(&mut packet);
         info!("Launch response sent to server");
     }
 
@@ -601,7 +605,7 @@ impl Client {
         packet.write_u16(PacketType::GameDataResend.to_u16());
         packet.write_i32(start as i32);
         packet.write_u8((end - start + 1) as u8);
-        self.send_packet(&packet);
+        self.send_packet(&mut packet);
 
         let now = Instant::now();
         for i in start..=end {
@@ -617,7 +621,7 @@ impl Client {
         let mut packet = Packet::new();
         packet.write_u16(PacketType::GameDataAck.to_u16());
         packet.write_u8((self.recv_window_start & 0xff) as u8);
-        self.send_packet(&packet);
+        self.send_packet(&mut packet);
         self.need_acknowledge = false;
         debug!("Game data acknowledgment sent");
     }
@@ -642,7 +646,7 @@ impl Client {
             }
         }
 
-        self.send_packet(&packet);
+        self.send_packet(&mut packet);
         self.need_acknowledge = false;
         debug!("Sent tics from {} to {}", start, end);
     }
@@ -838,14 +842,15 @@ impl Client {
         self.settings
     }
 
-    fn send_packet(&mut self, packet: &Packet) {
+    fn send_packet(&mut self, packet: &mut Packet) {
+        let packet_type_value = u16::from_be_bytes([packet.data[0], packet.data[1]]);
         let is_reliable = matches!(
-            PacketType::from_u16(u16::from_le_bytes([packet.data[0], packet.data[1]])),
-            Some(PacketType::Syn)
-                | Some(PacketType::Launch)
-                | Some(PacketType::GameStart)
-                | Some(PacketType::Disconnect)
+            PacketType::from_u16(packet_type_value & !0x8000),
+            Some(PacketType::Launch) | Some(PacketType::GameStart) | Some(PacketType::Disconnect)
         );
+        if is_reliable {
+            packet.data[0] |= 0x80; // Set the reliable bit
+        }
 
         if is_reliable {
             self.reliable_packets
@@ -853,7 +858,7 @@ impl Client {
             self.next_reliable_seq += 1;
         }
         if let Some(server_addr) = self.server_addr {
-            if let Err(e) = self.socket.send_to(&packet.data, server_addr) {
+            if let Err(e) = self.socket.send_to(&mut packet.data, server_addr) {
                 warn!("Failed to send packet: {}", e);
             }
         }
@@ -880,12 +885,6 @@ impl Client {
             if self.last_syn_time.elapsed() >= Duration::from_secs(1) {
                 self.send_syn();
                 self.last_syn_time = Instant::now();
-
-                // Send GAMEDATA_RESEND packets immediately after SYN
-                for _ in 0..3 {
-                    self.send_gamedata_resend();
-                    thread::sleep(Duration::from_millis(10));
-                }
             }
 
             self.receive_packets();
@@ -905,14 +904,6 @@ impl Client {
                 .clone()
                 .unwrap_or_else(|| "Connection failed".to_string()))
         }
-    }
-
-    fn send_gamedata_resend(&mut self) {
-        let mut packet = Packet::new();
-        packet.write_u16(PacketType::GameDataResend.to_u16());
-        packet.write_u32(0); // Sequence number or other data
-        packet.write_u8(0x80); // The 128 value we observed
-        self.send_packet(&packet);
     }
 
     pub fn run_tic(&mut self, cmds: &[TicCmd; NET_MAXPLAYERS], ingame: &[bool; NET_MAXPLAYERS]) {
@@ -1006,7 +997,7 @@ impl Client {
         let mut packet = Packet::new();
         packet.write_u16(PacketType::GameStart.to_u16());
         packet.write_settings(settings);
-        self.send_packet(&packet);
+        self.send_packet(&mut packet);
         info!("GameStart sent to server");
     }
 
@@ -1015,7 +1006,7 @@ impl Client {
             self.state = ClientState::Disconnecting;
             let mut packet = Packet::new();
             packet.write_u16(PacketType::Disconnect.to_u16());
-            self.send_packet(&packet);
+            self.send_packet(&mut packet);
             info!("Disconnect request sent to server");
         }
     }

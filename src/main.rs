@@ -55,12 +55,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let connect_data = ConnectData {
-        gamemode: 1,
-        gamemission: 4,
-        lowres_turn: 0,
-        drone: 119,
-        max_players: 66,
-        is_freedoom: 8,
+        gamemode: 3,    // For Doom II, set to 3 (commercial)
+        gamemission: 2, // For Doom II, gamemission is usually 2
+        lowres_turn: 0, // Usually 0
+        drone: 0,       // Set to 0 for a regular player
+        max_players: 4, // Set within the valid range (e.g., 4)
+        is_freedoom: 0, // 0 if not using Freedoom
         wad_sha1sum: wad_sha1.into(),
         deh_sha1sum: [0; 20],
         player_class: 22,

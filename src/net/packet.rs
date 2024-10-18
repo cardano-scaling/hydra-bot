@@ -19,7 +19,7 @@ impl Packet {
     }
 
     pub fn write_u16(&mut self, value: u16) {
-        self.data.extend_from_slice(&value.to_le_bytes());
+        self.data.extend_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_connect_data(&mut self, data: &ConnectData) {
@@ -35,7 +35,7 @@ impl Packet {
     }
 
     pub fn write_u32(&mut self, value: u32) {
-        self.data.extend_from_slice(&value.to_le_bytes());
+        self.data.extend_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_string(&mut self, s: &str) {
@@ -134,11 +134,11 @@ impl Packet {
     }
 
     pub fn write_i16(&mut self, value: i16) {
-        self.data.extend_from_slice(&value.to_le_bytes());
+        self.data.extend_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_i32(&mut self, value: i32) {
-        self.data.extend_from_slice(&value.to_le_bytes());
+        self.data.extend_from_slice(&value.to_be_bytes());
     }
 
     pub fn read_u8(&mut self) -> Option<u8> {
@@ -174,6 +174,16 @@ impl Packet {
             let bytes = &self.data[self.pos..self.pos + 4];
             self.pos += 4;
             Some(u32::from_be_bytes(bytes.try_into().unwrap()))
+        } else {
+            None
+        }
+    }
+
+    pub fn read_blob(&mut self, buf: &mut [u8]) -> Option<()> {
+        if self.pos + buf.len() <= self.data.len() {
+            buf.copy_from_slice(&self.data[self.pos..self.pos + buf.len()]);
+            self.pos += buf.len();
+            Some(())
         } else {
             None
         }

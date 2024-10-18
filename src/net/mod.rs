@@ -48,15 +48,15 @@ pub struct ConnectData {
 impl Default for ConnectData {
     fn default() -> Self {
         ConnectData {
-            gamemode: 1,
-            gamemission: 0,
-            lowres_turn: 0,
-            drone: 0,
-            max_players: 4,
-            is_freedoom: 0,
-            wad_sha1sum: [0; 20],
+            gamemode: 3,          // Correct gamemode (commercial)
+            gamemission: 2,       // Correct gamemission (doom2)
+            lowres_turn: 0,       // Should be 0 or 1
+            drone: 0,             // 0 for regular player
+            max_players: 4,       // Valid range is typically 1 to 4 or 1 to 8
+            is_freedoom: 0,       // 0 if not using Freedoom
+            wad_sha1sum: [0; 20], // Ensure correct SHA1 sum is used
             deh_sha1sum: [0; 20],
-            player_class: 112,
+            player_class: 0, // 0 unless the game supports classes
         }
     }
 }
