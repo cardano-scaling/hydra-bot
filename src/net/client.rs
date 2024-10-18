@@ -1041,6 +1041,7 @@ impl Client {
 mod tests {
     use super::*;
     use crate::net::ConnectData;
+    use std::fmt::Write;
 
     #[test]
     fn test_syn_message() {
@@ -1067,12 +1068,12 @@ mod tests {
         client.send_syn(&connect_data, &mut packet);
 
         let hex_string = packet.data.iter().fold(String::new(), |mut acc, &b| {
-            write!(acc, "{:02x}", b).unwrap();
+            write!(&mut acc, "{:02x}", b).unwrap();
             acc
         });
 
         // Expected hexadecimal string
-        let expected = "00008ce1ab5643686f636f6c61746520446f6f6d20332e302e31000143484f434f4c4154455f444f4f4d5f30000100000004007742089b4468a736cadb659a7deca3320fe6dcbd000000000000000000000000000000000000000016706366636f73746100";
+        let expected = "00008ce1ab5643686f636f6c61746520446f6f6d20332e302e31000143484f434f4c4154455f444f4f4d5f30000100000004007742089b4468a736cadb659a7deca3320fe6dcbd00000000000000000000000000000000000000001668796472612d626f7400";
 
         // Assert that the generated packet matches the expected string
         assert_eq!(
