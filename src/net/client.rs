@@ -231,7 +231,7 @@ impl Client {
     }
 
     fn handle_waiting_start(&mut self) {
-        let settings_clone = self.settings.clone();
+        let settings_clone = self.settings;
         if let Some(settings) = settings_clone {
             self.send_game_start(&settings);
         }
@@ -495,7 +495,6 @@ impl Client {
             self.check_for_missing_tics(seq);
         } else {
             error!("Failed to read sequence number or number of tics");
-            return;
         }
     }
 
@@ -670,7 +669,7 @@ impl Client {
             .map_or(0, |s| s.consoleplayer as usize);
         let drone = self.drone;
 
-        for i in 0..NET_MAXPLAYERS {
+        for (i, ticcmd) in ticcmds.iter_mut().enumerate().take(NET_MAXPLAYERS) {
             if i == consoleplayer && !drone {
                 continue;
             }
@@ -678,8 +677,8 @@ impl Client {
             if cmd.playeringame[i] {
                 let diff = &cmd.cmds[i];
                 let mut base = self.bot.recvwindow_cmd_base[i];
-                Self::apply_ticcmd_diff(&mut base, diff, &mut ticcmds[i]);
-                self.bot.recvwindow_cmd_base[i] = ticcmds[i];
+                Self::apply_ticcmd_diff(&mut base, diff, ticcmd);
+                self.bot.recvwindow_cmd_base[i] = *ticcmd;
             }
         }
     }
@@ -1067,11 +1066,10 @@ mod tests {
         let mut packet = Packet::new();
         client.send_syn(&connect_data, &mut packet);
 
-        let hex_string = packet
-            .data
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>();
+        let hex_string = packet.data.iter().fold(String::new(), |mut acc, &b| {
+            write!(acc, "{:02x}", b).unwrap();
+            acc
+        });
 
         // Expected hexadecimal string
         let expected = "00008ce1ab5643686f636f6c61746520446f6f6d20332e302e31000143484f434f4c4154455f444f4f4d5f30000100000004007742089b4468a736cadb659a7deca3320fe6dcbd000000000000000000000000000000000000000016706366636f73746100";

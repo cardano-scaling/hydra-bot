@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wad_sha1 = Sha1::digest(&wad_contents);
 
     info!(
-        sha1 = hex::encode(&wad_sha1),
+        sha1 = hex::encode(wad_sha1),
         "Calculated SHA1 for the WAD file"
     );
 

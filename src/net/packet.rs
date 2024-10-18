@@ -256,31 +256,32 @@ impl Packet {
     }
 
     pub fn read_settings(&mut self) -> Option<GameSettings> {
-        let mut settings = GameSettings::default();
-
-        settings.ticdup = self.read_u8()? as i32;
-        settings.extratics = self.read_u8()? as i32;
-        settings.deathmatch = self.read_u8()? as i32;
-        settings.nomonsters = self.read_u8()? as i32;
-        settings.fast_monsters = self.read_u8()? as i32;
-        settings.respawn_monsters = self.read_u8()? as i32;
-        settings.episode = self.read_u8()? as i32;
-        settings.map = self.read_u8()? as i32;
-        settings.skill = self.read_i8()? as i32;
-        settings.gameversion = self.read_u8()? as i32;
-        settings.lowres_turn = self.read_u8()? as i32;
-        settings.new_sync = self.read_u8()? as i32;
-        settings.timelimit = self.read_u32()?;
-        settings.loadgame = self.read_i8()? as i32;
-        settings.random = self.read_u8()? as i32;
-        settings.num_players = self.read_u8()? as i32;
-        settings.consoleplayer = self.read_i8()? as i32;
-
-        for i in 0..(settings.num_players as usize) {
-            settings.player_classes[i] = self.read_u8()? as i32;
-        }
-
-        Some(settings)
+        Some(GameSettings {
+            ticdup: self.read_u8()? as i32,
+            extratics: self.read_u8()? as i32,
+            deathmatch: self.read_u8()? as i32,
+            nomonsters: self.read_u8()? as i32,
+            fast_monsters: self.read_u8()? as i32,
+            respawn_monsters: self.read_u8()? as i32,
+            episode: self.read_u8()? as i32,
+            map: self.read_u8()? as i32,
+            skill: self.read_i8()? as i32,
+            gameversion: self.read_u8()? as i32,
+            lowres_turn: self.read_u8()? as i32,
+            new_sync: self.read_u8()? as i32,
+            timelimit: self.read_u32()?,
+            loadgame: self.read_i8()? as i32,
+            random: self.read_u8()? as i32,
+            num_players: self.read_u8()? as i32,
+            consoleplayer: self.read_i8()? as i32,
+            player_classes: {
+                let mut classes = [0; NET_MAXPLAYERS];
+                for i in 0..(self.read_u8()? as usize) {
+                    classes[i] = self.read_u8()? as i32;
+                }
+                classes
+            },
+        })
     }
 
     pub fn read_full_ticcmd(&mut self, lowres_turn: bool) -> Option<FullTicCmd> {

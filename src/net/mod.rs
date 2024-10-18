@@ -122,7 +122,7 @@ impl PacketType {
     pub fn from_u16(value: u16) -> Option<Self> {
         use std::mem::transmute;
         if value <= PacketType::NatHolePunch as u16 {
-            Some(unsafe { transmute(value) })
+            Some(unsafe { transmute::<u16, PacketType>(value) })
         } else {
             None
         }
