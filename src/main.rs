@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Args = argh::from_env();
 
     info!("Initializing client");
-    let mut client = Client::new("HydraBot".to_string(), false)?;
+    let mut client = Client::new("HydraBot".to_string())?;
     client.init();
 
     info!("Initializing game");

@@ -85,8 +85,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(drone: bool) -> io::Result<Self> {
-        info!("Creating new Client: drone={}", drone);
+    pub fn new(player_name: String) -> io::Result<Self> {
+        info!("Creating new Client");
 
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
@@ -96,8 +96,8 @@ impl Client {
             server_addr: None,
             settings: None,
             reject_reason: None,
-            player_name: "pcfcosta".to_string(),
-            drone,
+            player_name: "pcfcosta".to_string(), // Set the correct player name
+            drone: false,
             recv_window_start: 0,
             recv_window: [ServerRecv::default(); BACKUPTICS],
             send_queue: [ServerSend::default(); BACKUPTICS],
@@ -983,7 +983,7 @@ impl Client {
         let mut packet = Packet::new();
 
         packet.write_u16(PacketType::Syn.to_u16());
-        packet.write_u32(NET_MAGIC_NUMBER);
+        packet.write_u32(0x56abe18c); // Correct NET_MAGIC_NUMBER in little-endian
         packet.write_string(PACKAGE_STRING);
         packet.write_u8(1); // Number of protocols
         packet.write_string("CHOCOLATE_DOOM_0");

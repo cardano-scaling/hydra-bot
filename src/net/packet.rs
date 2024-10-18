@@ -34,7 +34,7 @@ impl Packet {
         self.write_u8(data.is_freedoom);
         self.write_blob(&data.wad_sha1sum);
         self.write_blob(&data.deh_sha1sum);
-        self.write_u8(data.player_class);
+        // Note: player_class is written separately in send_syn
     }
 
     pub fn read_protocol(&mut self) -> Option<Protocol> {
