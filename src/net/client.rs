@@ -11,7 +11,6 @@ use super::*;
 
 const PACKAGE_STRING: &str = "Chocolate Doom 3.0.1";
 const KEEPALIVE_PERIOD: Duration = Duration::from_secs(1);
-const CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
 
 struct PIDController {
     kp: f32,
@@ -73,6 +72,9 @@ pub struct Client {
     last_gamedata_time: Instant,
     reliable_packets: std::collections::HashMap<u32, Packet>,
     next_reliable_seq: u32,
+    connection_start_time: Instant,
+    last_syn_time: Instant,
+    connect_data: ConnectData,
 }
 
 impl Client {
@@ -111,6 +113,9 @@ impl Client {
             last_gamedata_time: Instant::now(),
             reliable_packets: std::collections::HashMap::new(),
             next_reliable_seq: 0,
+            connection_start_time: Instant::now(),
+            last_syn_time: Instant::now(),
+            connect_data: ConnectData::default(),
         })
     }
 
@@ -178,17 +183,31 @@ impl Client {
     pub fn run(&mut self) {
         self.receive_packets();
         self.handle_state();
+        self.send_keepalive();
+        self.check_resends();
 
         if self.need_acknowledge {
             self.send_game_data_ack();
         }
 
-        self.handle_state();
-        self.send_keepalive();
-        self.check_resends();
-
         if self.state == ClientState::InGame {
             self.build_and_send_tic(self.gametic as u32);
+        }
+    }
+
+    fn handle_state(&mut self) {
+        match self.state {
+            ClientState::Connecting => {
+                if self.last_syn_time.elapsed() >= Duration::from_secs(1) {
+                    self.send_syn();
+                    self.last_syn_time = Instant::now();
+                }
+            }
+            ClientState::WaitingLaunch => self.handle_waiting_launch(),
+            ClientState::WaitingStart => self.handle_waiting_start(),
+            ClientState::InGame => self.handle_in_game(),
+            ClientState::Disconnecting => self.handle_disconnecting(),
+            _ => {}
         }
     }
 
@@ -203,25 +222,6 @@ impl Client {
                 pos: 0,
             };
             self.parse_packet(&mut packet);
-        }
-    }
-
-    fn handle_state(&mut self) {
-        match self.state {
-            ClientState::Connecting => self.handle_connecting(),
-            ClientState::WaitingLaunch => self.handle_waiting_launch(),
-            ClientState::WaitingStart => self.handle_waiting_start(),
-            ClientState::InGame => self.handle_in_game(),
-            ClientState::Disconnecting => self.handle_disconnecting(),
-            _ => {}
-        }
-    }
-
-    fn handle_connecting(&mut self) {
-        let elapsed = self.start_time.elapsed();
-        debug!("Connecting... Time elapsed: {:?}", elapsed);
-        if elapsed > CONNECTION_TIMEOUT {
-            self.handle_connection_timeout();
         }
     }
 
@@ -245,14 +245,6 @@ impl Client {
         if self.start_time.elapsed() > Duration::from_secs(5) {
             self.handle_disconnection_timeout();
         }
-    }
-
-    fn handle_connection_timeout(&mut self) {
-        warn!("Connection attempt timed out");
-        self.reject_reason = Some("Connection attempt timed out".to_string());
-        info!("Disconnected from server");
-
-        self.shutdown();
     }
 
     fn handle_disconnection_timeout(&mut self) {
@@ -279,23 +271,22 @@ impl Client {
     }
 
     fn parse_packet(&mut self, packet: &mut Packet) {
-        let original_data = packet.data.clone();
-        let packet_type = packet.read_u16().and_then(PacketType::from_u16);
-
-        match packet_type {
-            Some(PacketType::Syn) => self.parse_syn(packet),
-            Some(PacketType::Ack) => self.parse_ack(packet),
-            Some(PacketType::Rejected) => self.parse_reject(packet),
-            Some(PacketType::WaitingData) => self.parse_waiting_data(packet),
-            Some(PacketType::Launch) => self.parse_launch(packet),
-            Some(PacketType::GameStart) => self.parse_game_start(packet),
-            Some(PacketType::GameData) => self.parse_game_data(packet),
-            Some(PacketType::GameDataResend) => self.parse_resend_request(packet),
-            Some(PacketType::ConsoleMessage) => self.parse_console_message(packet),
-            Some(PacketType::Disconnect) => self.parse_disconnect(packet),
-            Some(PacketType::DisconnectAck) => self.parse_disconnect_ack(packet),
-            Some(PacketType::KeepAlive) => debug!("Received keep-alive packet"),
-            _ => warn!("Unknown packet type: {:x?}", original_data),
+        if let Some(packet_type) = packet.read_u16().and_then(PacketType::from_u16) {
+            match packet_type {
+                PacketType::Syn => self.parse_syn(packet),
+                PacketType::Ack => self.parse_ack(packet),
+                PacketType::Rejected => self.parse_reject(packet),
+                PacketType::WaitingData => self.parse_waiting_data(packet),
+                PacketType::Launch => self.parse_launch(packet),
+                PacketType::GameStart => self.parse_game_start(packet),
+                PacketType::GameData => self.parse_game_data(packet),
+                PacketType::GameDataResend => self.parse_resend_request(packet),
+                PacketType::ConsoleMessage => self.parse_console_message(packet),
+                PacketType::Disconnect => self.parse_disconnect(packet),
+                PacketType::DisconnectAck => self.parse_disconnect_ack(packet),
+                PacketType::KeepAlive => debug!("Received keep-alive packet"),
+                _ => warn!("Unknown packet type: {:?}", packet_type),
+            }
         }
     }
 
@@ -316,31 +307,13 @@ impl Client {
 
     fn parse_syn(&mut self, packet: &mut Packet) {
         debug!("Processing SYN response");
-
-        if let Some(magic) = packet.read_u32() {
-            if magic != NET_MAGIC_NUMBER {
-                error!("Incorrect magic number in SYN packet");
-                return;
-            }
-        } else {
-            error!("Failed to read magic number from SYN packet");
-            return;
-        }
-
         if let Some(server_version) = packet.read_safe_string() {
             debug!("Server version: {}", server_version);
-
             if let Some(protocol) = self.negotiate_protocol(packet) {
                 self.protocol = protocol;
                 info!("Negotiated protocol: {:?}", protocol);
-
-                // Set the connection state to CONNECTED
                 self.state = ClientState::Connected;
-
-                // Send an ACK packet in response to the SYN
                 self.send_ack();
-
-                // Check for version mismatch
                 if server_version != PACKAGE_STRING {
                     warn!(
                         "Version mismatch: Client is '{}', but the server is '{}'. \
@@ -853,10 +826,8 @@ impl Client {
     pub fn connect<A: ToSocketAddrs>(
         &mut self,
         addr: A,
-        mut connect_data: ConnectData,
+        connect_data: ConnectData,
     ) -> Result<(), String> {
-        // Ensure max_players is set to 4
-        connect_data.max_players = 4;
         let addr = addr
             .to_socket_addrs()
             .map_err(|e| format!("Failed to resolve address: {}", e))?
@@ -865,28 +836,15 @@ impl Client {
 
         self.server_addr = Some(addr);
         self.state = ClientState::Connecting;
+        self.connection_start_time = Instant::now();
+        self.last_syn_time = Instant::now() - Duration::from_secs(1);
+        self.connect_data = connect_data;
 
-        let start_time = Instant::now();
-        let mut last_send_time = Instant::now() - Duration::from_secs(1);
-
-        let mut syn_sent = false;
         while self.state == ClientState::Connecting {
-            let now = Instant::now();
+            self.run();
 
-            if now.duration_since(start_time) > Duration::from_secs(5) {
+            if self.connection_start_time.elapsed() > Duration::from_secs(120) {
                 return Err("Connection timed out".to_string());
-            }
-
-            if !syn_sent || now.duration_since(last_send_time) >= Duration::from_secs(1) {
-                self.send_syn(&connect_data, &mut Packet::new());
-                last_send_time = now;
-                syn_sent = true;
-            }
-
-            self.receive_packets();
-
-            if self.state != ClientState::Connecting {
-                break; // Exit the loop if we've received a response
             }
 
             thread::sleep(Duration::from_millis(10));
@@ -902,16 +860,16 @@ impl Client {
         }
     }
 
-    fn send_syn(&mut self, connect_data: &ConnectData, packet: &mut Packet) {
+    fn send_syn(&mut self) {
+        let mut packet = Packet::new();
         packet.write_u16(PacketType::Syn.to_u16());
-        packet.write_u32(0x56abe18c);
+        packet.write_u32(NET_MAGIC_NUMBER);
         packet.write_string(PACKAGE_STRING);
         packet.write_u8(1); // Number of protocols
         packet.write_string("CHOCOLATE_DOOM_0");
-        packet.write_connect_data(connect_data);
+        packet.write_connect_data(&self.connect_data);
         packet.write_string(&self.player_name);
-
-        self.send_packet(packet);
+        self.send_packet(&packet);
     }
 
     pub fn run_tic(&mut self, cmds: &[TicCmd; NET_MAXPLAYERS], ingame: &[bool; NET_MAXPLAYERS]) {
